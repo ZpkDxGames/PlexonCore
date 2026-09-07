@@ -1,0 +1,39 @@
+name: PlexonCore
+version: '${project.version}'
+main: com.zpkdxgames.plexoncore.PlexonCorePlugin
+api-version: '26.2'
+load: STARTUP
+author: Tonim (ZpkDxGames)
+description: Shared runtime foundation for the PlexonCraft plugin ecosystem.
+website: https://github.com/ZpkDxGames/PlexonCore
+softdepend:
+  - PlaceholderAPI
+  - Vault
+  - LuckPerms
+commands:
+  plexon:
+    description: PlexonCore ecosystem diagnostics.
+    usage: /plexon [status|modules|integrations|diagnostics|version|reload]
+    aliases: [plexoncore, pcore]
+    permission: plexoncore.use
+permissions:
+  plexoncore.use:
+    default: true
+  plexoncore.admin:
+    default: op
+    children:
+      plexoncore.admin.status: true
+      plexoncore.admin.modules: true
+      plexoncore.admin.integrations: true
+      plexoncore.admin.diagnostics: true
+      plexoncore.admin.reload: true
+  plexoncore.admin.status:
+    default: op
+  plexoncore.admin.modules:
+    default: op
+  plexoncore.admin.integrations:
+    default: op
+  plexoncore.admin.diagnostics:
+    default: op
+  plexoncore.admin.reload:
+    default: op
