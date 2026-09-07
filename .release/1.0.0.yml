@@ -1,0 +1,7 @@
+release: 1.0.0
+tag: v1.0.0
+artifact: PlexonCore-1.0.0.jar
+checksum: SHA256SUMS.txt
+api: '1.0'
+platform: Paper 26.2
+java: 25
