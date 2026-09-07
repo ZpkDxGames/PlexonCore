@@ -64,7 +64,7 @@ public final class SqliteService implements AutoCloseable {
         }
 
         public CompletableFuture<Void> executeWrite(SqlWork work) {
-            return writer.submit(() -> {
+            return writer.<Void>submit(() -> {
                 try (Connection connection = connection()) {
                     connection.setAutoCommit(false);
                     try {
