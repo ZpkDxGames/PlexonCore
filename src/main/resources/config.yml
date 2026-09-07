@@ -1,0 +1,17 @@
+schema-version: 1
+
+text:
+  placeholder-rendering:
+    default: SAFE
+    allow-legacy: true
+    allow-minimessage: true
+
+gui:
+  click-sound: UI_BUTTON_CLICK
+
+diagnostics:
+  verbose-startup: false
+
+executor:
+  worker-threads: 2
+  queue-capacity: 4096
