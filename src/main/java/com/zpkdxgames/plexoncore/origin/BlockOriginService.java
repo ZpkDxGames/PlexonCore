@@ -78,6 +78,55 @@ public final class BlockOriginService implements Listener {
         return state.loadedFromPersistence ? BlockOrigin.NATURAL : BlockOrigin.UNKNOWN;
     }
 
+    /**
+     * Idempotently imports player-placed coordinates from a migrating module into Core's
+     * authoritative origin store. The call updates the in-memory chunk state synchronously and
+     * completes only after the batch has been persisted with INSERT OR IGNORE.
+     *
+     * <p>The caller should invoke this from the primary thread when the source coordinates came
+     * from Bukkit/Paper chunk data. A failed future means the migration marker must not be
+     * advanced; retrying the same positions is safe.</p>
+     */
+    public CompletableFuture<Integer> importPlayerPlaced(UUID worldId, Collection<BlockPosition> positions) {
+        Objects.requireNonNull(worldId, "worldId");
+        Objects.requireNonNull(positions, "positions");
+        if (positions.isEmpty()) return CompletableFuture.completedFuture(0);
+
+        SqliteDatabase db = database;
+        if (db == null || !persistenceReady.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Core block-origin persistence is not ready"));
+        }
+
+        List<Position> inserts = new ArrayList<>(positions.size());
+        int imported = 0;
+        for (BlockPosition coordinate : positions) {
+            if (coordinate == null) continue;
+            ChunkKey chunkKey = key(worldId, coordinate.x() >> 4, coordinate.z() >> 4);
+            long packed = pack(coordinate.x(), coordinate.y(), coordinate.z());
+            ChunkState state = chunks.computeIfAbsent(chunkKey, ignored -> new ChunkState());
+            synchronized (state) {
+                if (state.playerPlaced.add(packed)) imported++;
+                if (!state.loadedFromPersistence) {
+                    state.addedBeforeLoad.add(packed);
+                    state.removedBeforeLoad.remove(packed);
+                }
+            }
+            inserts.add(new Position(chunkKey, packed));
+        }
+        if (inserts.isEmpty()) return CompletableFuture.completedFuture(0);
+
+        int importedCount = imported;
+        return db.executeWrite(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) {
+                for (Position position : inserts) {
+                    bind(ps, position.key, position.packed);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+        }).thenApply(ignored -> importedCount);
+    }
+
     public Stats stats() {
         long tracked = chunks.values().stream().mapToLong(state -> state.playerPlaced.size()).sum();
         long loaded = chunks.values().stream().filter(state -> state.loadedFromPersistence).count();
@@ -169,6 +218,7 @@ public final class BlockOriginService implements Listener {
     static long pack(int x, int y, int z) { return ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | (y & 0xFFFL); }
     private static Throwable unwrap(Throwable error) { return error instanceof java.util.concurrent.CompletionException && error.getCause() != null ? error.getCause() : error; }
 
+    public record BlockPosition(int x, int y, int z) {}
     private record ChunkKey(UUID worldId, int chunkX, int chunkZ) {}
     private record Position(ChunkKey key, long packed) {}
     private record Move(Position from, Position to) {}
