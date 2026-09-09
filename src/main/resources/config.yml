@@ -13,5 +13,9 @@ diagnostics:
   verbose-startup: false
 
 executor:
+  # Bounded CPU lane. Default is selected from available processors when omitted by older configs.
   worker-threads: 2
   queue-capacity: 4096
+  # Separate bounded lane for blocking IO/query preparation. SQLite writes remain serialized per database.
+  io-threads: 1
+  io-queue-capacity: 2048
