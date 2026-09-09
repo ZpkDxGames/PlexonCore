@@ -50,7 +50,7 @@ public final class CoreEventGateway implements Listener {
     /**
      * Capture immutable facts before Core's MONITOR provenance cleanup consumes the source coordinate.
      * Subscriber dispatch is deliberately deferred to the MONITOR handler below so the callback observes
-     * the final cancellation state while retaining event-time origin.
+     * the final cancellation/drop state while retaining event-time origin.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void captureBlockBreak(BlockBreakEvent event) {
@@ -80,7 +80,7 @@ public final class CoreEventGateway implements Listener {
             : itemIdentityResolver.resolve(player.getInventory().getItemInMainHand(), plan.itemIdentityNamespaces());
         CoreBlockBreakContext context = new CoreBlockBreakContext(
             eventSequence.incrementAndGet(), player.getUniqueId(), player.getName(), worldId, world.getName(), x, y, z,
-            material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime()
+            material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime(), event.isDropItems()
         );
         metrics.contextCreated();
         metrics.contextNanos(System.nanoTime() - contextStart);
@@ -89,7 +89,8 @@ public final class CoreEventGateway implements Listener {
 
     /**
      * Final authoritative block outcome. A cancelled event is consumed without notifying subscribers.
-     * The cached context contains the origin captured before BlockOriginService removes the broken position.
+     * The cached context contains the origin captured before BlockOriginService removes the broken position;
+     * the drop flag is refreshed here so consumers observe the final event decision.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void dispatchFinalBlockBreak(BlockBreakEvent event) {
@@ -100,9 +101,10 @@ public final class CoreEventGateway implements Listener {
             return;
         }
 
+        CoreBlockBreakContext finalContext = pending.context().withDropItems(event.isDropItems());
         long dispatchStart = System.nanoTime();
         for (SubscriptionRegistry.Subscriber subscriber : pending.plan().subscribers()) {
-            try { subscriber.handler().handle(pending.context()); }
+            try { subscriber.handler().handle(finalContext); }
             catch (Throwable failure) { metrics.moduleFailure(); rateLimitedFailure(subscriber.moduleId(), failure); }
         }
         metrics.dispatchNanos(System.nanoTime() - dispatchStart);
