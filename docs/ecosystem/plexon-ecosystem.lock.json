@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-09",
+  "paper": "26.2.build.121-stable",
+  "java": 25,
+  "runtimeCertification": "NOT_EXECUTED",
+  "core": {
+    "repository": "ZpkDxGames/PlexonCore",
+    "version": "2.0.4",
+    "commit": "83571edb428472649af87be9d52868fc8f325806",
+    "tag": "v2.0.4",
+    "jar": "PlexonCore-2.0.4.jar",
+    "sha256": "61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf",
+    "api": "2.0",
+    "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+  },
+  "deployment": [
+    {
+      "id": "blacksmith",
+      "repository": "ZpkDxGames/PlexonBlacksmith",
+      "version": "1.4.1",
+      "commit": "2fca852d0c2e9efddd9d8d55865c7b5c0c46fcb5",
+      "tag": "v1.4.1",
+      "jar": "PlexonBlacksmith-1.4.1.jar",
+      "sha256": "0c371dc03be7fec01463c2024b98e3ad804f06a7af5d45c8be848cf5733ae88e",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "chats",
+      "repository": "ZpkDxGames/PlexonChats",
+      "version": "3.1.1",
+      "commit": "c7191c21654b11ea55c03e5fecae629e20898319",
+      "tag": "v3.1.1",
+      "jar": "PlexonChats-3.1.1.jar",
+      "sha256": "ed544c8323e31f42b2f4fbe53655810f1082fd632adf6a89bc22b2705150865c",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "ranks",
+      "repository": "ZpkDxGames/PlexonRanks",
+      "version": "2.2.1",
+      "commit": "8f6fd363959041faf13399cd24bd315fa55176e8",
+      "tag": "v2.2.1",
+      "jar": "PlexonRanks-2.2.1.jar",
+      "sha256": "c688f483977be2026e6c5bd717cd855140eae3cb01214a35f83e59891d8d4fd8",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "backpacks",
+      "repository": "ZpkDxGames/PlexonBackpacks",
+      "version": "1.2.1",
+      "commit": "488faf508d0708e60b2caab64a97a7e63b06a7c8",
+      "tag": "v1.2.1",
+      "jar": "PlexonBackpacks-1.2.1.jar",
+      "sha256": "1a0eb1f3a60ac3c1b1a213281876a0026124f6d54190d158c77134b4c2cec018",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "crates",
+      "repository": "ZpkDxGames/PlexonCrates",
+      "version": "4.6.0",
+      "commit": "261270243beb9ff4a8992f53095f16c20458f770",
+      "tag": "v4.6.0",
+      "jar": "PlexonCrates-4.6.0.jar",
+      "sha256": "9063aa118bdfe8e3d4b47d4db269ed94f858771afae9fb78f20f79dfce0af8f6",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "keys",
+      "repository": "ZpkDxGames/PlexonKeys",
+      "version": "1.4.1",
+      "commit": "c06a9e4107fc259f45d32d1f0767e5e2b5d1d872",
+      "tag": "v1.4.1",
+      "jar": "PlexonKeys-1.4.1.jar",
+      "sha256": "45475f68042d9a1d025fba7aec689e390a355e5ea996bf965198e943993a28f1",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "quests",
+      "repository": "ZpkDxGames/PlexonQuests",
+      "version": "3.3.1",
+      "commit": "b74fc212d5aea41a0e01e9bc1bf5c5382302d014",
+      "tag": "v3.3.1",
+      "jar": "PlexonQuests-3.3.1.jar",
+      "sha256": "691a5d48bf24f213ab7d07cbe8925e4ef57082374829655e8d3d6d9bb2738fe1",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "shops",
+      "repository": "ZpkDxGames/PlexonShops",
+      "version": "2.2.1",
+      "commit": "81c77e936194de2d46fd40221ea57a1f65c07b34",
+      "tag": "v2.2.1",
+      "jar": "PlexonShops-2.2.1.jar",
+      "sha256": "d5824ba980e4e0ec646692f6c0d5bcf4aa8f251e67d70d4a29186742e2a93468",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "tools",
+      "repository": "ZpkDxGames/PlexonTools",
+      "version": "4.2.1",
+      "commit": "6e7a285fba8c16fc647ccc22c2c8342b2eb96711",
+      "tag": "v4.2.1",
+      "jar": "PlexonTools-4.2.1.jar",
+      "sha256": "ba61905ae6f7a9d5c5b0043d0e51719822b22f67905325fb43b8317931849293",
+      "coreApiRange": ">=1.0 <3.0",
+      "authority": "LOCAL_AUTHORITY / CORE_REGISTERED",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "travel",
+      "repository": "ZpkDxGames/PlexonTravel",
+      "version": "1.0.1",
+      "commit": "772188d55c694deea0bc5ae0bdce0898513499e5",
+      "tag": "v1.0.1",
+      "jar": "PlexonTravel-1.0.1.jar",
+      "sha256": "39a9bdcce5a7796c3204872b7b8e42e91378b0d0508f74cc1151ab8f232bc252",
+      "coreApiRange": ">=2.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "homes",
+      "repository": "ZpkDxGames/PlexonHomes",
+      "version": "1.0.1",
+      "commit": "d20bef0a76cd3006df51d46d67a3e48636650d31",
+      "tag": "v1.0.1",
+      "jar": "PlexonHomes-1.0.1.jar",
+      "sha256": "fbc68fd1f705134ae728751ce91704f63ea89413af700156f6622b41a86a5096",
+      "coreApiRange": ">=2.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "panel",
+      "repository": "ZpkDxGames/PlexonPanel",
+      "version": "3.1.1",
+      "commit": "e0984b625d692de6076afa7e20c4fe4b35f07e9a",
+      "tag": "v3.1.1",
+      "jar": "PlexonPanel-3.1.1.jar",
+      "sha256": "ac96ad323602ca367ecfa6b2cddcd3f3a3251bb5f7f34c3195b740907c93ff40",
+      "coreApiRange": ">=1.0 <3.0",
+      "protocol": 3,
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "spawners",
+      "repository": "ZpkDxGames/PlexonSpawners",
+      "version": "2.3.1",
+      "commit": "0ec54a04ecb77374874edf889b20286144c32a88",
+      "tag": "v2.3.1",
+      "jar": "PlexonSpawners-2.3.1.jar",
+      "sha256": "626299825e188db6f89dc5eb83f74bce3ce998aa3a45ffad817ee7372d39ffb8",
+      "coreApiRange": ">=1.0 <3.0",
+      "sourceStatus": "SOURCE_STABILIZED",
+      "nextPhase": "PREMIUM_MAJOR_REWORK_REQUIRED",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    },
+    {
+      "id": "gpflags",
+      "repository": "ZpkDxGames/PlexonGPFlags",
+      "version": "1.0.1",
+      "commit": "757f62fa52fdb6ffa718c57ab4515b60c5aa23f3",
+      "tag": "v1.0.1",
+      "jar": "PlexonGPFlags-1.0.1.jar",
+      "sha256": "fa7b60a81422d815ff777a46ce91dbfd5f877fcd39c1d5988dbc5ff67f19de82",
+      "coreApiRange": ">=1.0 <3.0",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    }
+  ],
+  "components": [
+    {
+      "id": "panel-dashboard-relay",
+      "repository": "ZpkDxGames/PlexonPanel-Dashboard",
+      "version": "3.0.2",
+      "commit": "03777c7dc108b54dda625c7f56f5e723ca35124f",
+      "protocol": 3,
+      "artifactType": "SOURCE_DEPLOYMENT_COMPONENT",
+      "classification": "CERTIFIED_SOURCE_RELEASE"
+    },
+    {
+      "id": "panel-host",
+      "repository": "ZpkDxGames/PlexonPanel",
+      "version": "3.1.1",
+      "commit": "e0984b625d692de6076afa7e20c4fe4b35f07e9a",
+      "tag": "v3.1.1",
+      "jar": "plexonpanel-host-3.1.1.jar",
+      "sha256": "e8bb99766cd39c9db157bd90f890c3d1873a65b2d1472b75d8b2c7aaabea0983",
+      "classification": "CERTIFIED_WITH_RUNTIME_PENDING"
+    }
+  ],
+  "excluded": [
+    {
+      "id": "skills",
+      "repository": "ZpkDxGames/PlexonSkills",
+      "version": "1.0.0-rc.1",
+      "commit": "bc7eb72271e4979a7d4095b90482739593c54f7e",
+      "tag": "v1.0.0-rc.1",
+      "jar": "PlexonSkills-1.0.0.jar",
+      "sha256": "b9291558f253cfc91f6daf89a34278b715a5ce2c304037fa2e89b64710f85bde",
+      "classification": "PRERELEASE_NOT_CERTIFIED",
+      "reason": "Live migration, SHADOW/PRIMARY, Spark and soak gates are not executed; major premium rebuild is next phase."
+    },
+    {
+      "id": "jobs",
+      "repository": "ZpkDxGames/PlexonJobs",
+      "version": "1.0.0-rc.1",
+      "commit": "e209dbc6e744882ae6cd5fd2426302f07f647010",
+      "tag": "v1.0.0-rc.1",
+      "jar": "PlexonJobs-1.0.0.jar",
+      "sha256": "29c47ebf4768d3d369206adc1894396939e49340853c603ac3d9fd1e067761b1",
+      "classification": "PRERELEASE_NOT_CERTIFIED",
+      "reason": "Migration, SHADOW/PRIMARY, economy review, Spark, load, soak and rollback validation are not executed."
+    },
+    {
+      "id": "utility",
+      "repository": "ZpkDxGames/PlexonUtility",
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "jar": "PlexonUtility-1.0.0.jar",
+      "sha256": "b98d01e0c497f2b05d06b6baf047b72c215a7ba5a8c549aa17515e27b5dfad1b",
+      "classification": "PLANNED_NOT_ACTIVE",
+      "reason": "Managed source release exists, but Essentials ownership/decommission staging is explicitly unresolved."
+    },
+    {
+      "id": "dailyrewards",
+      "repository": "ZpkDxGames/Plexon-DailyRewards",
+      "classification": "DEPRECATED",
+      "reason": "Historical standalone 1.x lineage; not part of the Core 2.0.4 deployment baseline."
+    },
+    {
+      "id": "claimflags",
+      "repository": "ZpkDxGames/PlexonGriefPreventionAddon",
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "jar": "PlexonClaimFlags-1.1.0.jar",
+      "sha256": "388520ab4c359b00f1908b663d807f6cfbf2d923b0eb6fb77110532e546e70e4",
+      "classification": "DEPRECATED",
+      "reason": "Replaced by PlexonGPFlags; rollback only; must not run alongside GPFlags."
+    }
+  ],
+  "counters": {
+    "startingInitial": 5,
+    "startingSourceFixed": 5,
+    "startingReleased": 5,
+    "startingRuntimeVerified": 0,
+    "legacyInitial": 4,
+    "legacySourceFixed": 4,
+    "legacyReleased": 4,
+    "legacyRuntimeVerified": 0,
+    "readyMaintenanceReleased": 4,
+    "travelReleased": 1,
+    "skillsPrereleaseNotCertified": 1,
+    "jobsPrereleaseNotCertified": 1,
+    "spawnersSourceStabilizedReleased": 1,
+    "plannedNotActive": 1,
+    "deprecated": 2,
+    "blockedKnownActiveSource": 0,
+    "unmanagedBinaries": 0,
+    "criticalDefectsOpen": 0,
+    "highDefectsOpen": 0
+  }
+}
