@@ -11,6 +11,7 @@ import com.zpkdxgames.plexoncore.item.ItemService;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry;
 import com.zpkdxgames.plexoncore.origin.BlockOriginService;
 import com.zpkdxgames.plexoncore.persistence.SqliteService;
+import com.zpkdxgames.plexoncore.player.PlayerWatchService;
 import com.zpkdxgames.plexoncore.scheduler.CoreScheduler;
 import com.zpkdxgames.plexoncore.text.TextService;
 import org.bukkit.Bukkit;
@@ -36,6 +37,7 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
     private SqliteService sqliteService;
     private BlockOriginService blockOriginService;
     private CoreEventGateway eventGateway;
+    private PlayerWatchService playerWatchService;
     private DiagnosticsService diagnosticsService;
     private PlexonCoreAPI api;
 
@@ -61,6 +63,7 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         blockOriginService = new BlockOriginService(this, scheduler);
         blockOriginService.start(sqliteService, getDataFolder().toPath().resolve("core-origin.db"));
         eventGateway = new CoreEventGateway(this, blockOriginService);
+        playerWatchService = new PlayerWatchService();
         diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService, scheduler, guiService, textService, eventGateway, blockOriginService);
 
         moduleRegistry.discoverLegacy(getServer().getPluginManager());
@@ -69,20 +72,30 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
 
         api = new DefaultCoreAPI();
         getServer().getServicesManager().register(PlexonCoreAPI.class, api, this, ServicePriority.Normal);
+        getServer().getServicesManager().register(PlayerWatchService.class, playerWatchService, this, ServicePriority.Normal);
         Objects.requireNonNull(getCommand("plexon"), "plexon command missing from plugin.yml").setExecutor(diagnosticsService);
         Objects.requireNonNull(getCommand("plexon"), "plexon command missing from plugin.yml").setTabCompleter(diagnosticsService);
         getServer().getPluginManager().registerEvents(blockOriginService, this);
         getServer().getPluginManager().registerEvents(eventGateway, this);
+        getServer().getPluginManager().registerEvents(playerWatchService, this);
         getServer().getPluginManager().registerEvents(this, this);
 
         getLogger().info(getPluginMeta().getVersion() + " enabled");
         getLogger().info("API 2.0 (API 1.0 compatibility bridge enabled)");
+        getLogger().info("Shared player watch runtime ready");
         getLogger().info("Modules discovered: " + moduleRegistry.totalDetected());
         String ready = integrationRegistry.all().stream().filter(i -> i.state() == IntegrationRegistry.IntegrationState.READY).map(IntegrationRegistry.IntegrationView::provider).sorted().reduce((a, b) -> a + ", " + b).orElse("none");
         getLogger().info("Integrations ready: " + ready);
     }
 
-    @Override public void onDisable() { if (getServer() != null) getServer().getServicesManager().unregisterAll(this); if (sqliteService != null) sqliteService.close(); if (scheduler != null) scheduler.close(); }
+    @Override
+    public void onDisable() {
+        if (playerWatchService != null) playerWatchService.close();
+        if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
+        if (sqliteService != null) sqliteService.close();
+        if (scheduler != null) scheduler.close();
+    }
+
     @EventHandler public void onPluginEnable(PluginEnableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
     @EventHandler public void onPluginDisable(PluginDisableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
 
