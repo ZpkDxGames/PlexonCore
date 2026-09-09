@@ -39,7 +39,7 @@ Every row above has source provenance, green release-line CI, a GitHub Release, 
 
 - `PlexonPanel-Dashboard` 3.0.2: managed source/deployment component at `03777c7dc108b54dda625c7f56f5e723ca35124f`; protocol 3; green dashboard/relay CI; no JAR release is expected.
 - `PlexonSkills` 1.0.0-rc.1: `PRERELEASE_NOT_CERTIFIED`; target `bc7eb72271e4979a7d4095b90482739593c54f7e`; major premium rework is the next phase.
-- `PlexonJobs` 1.0.0-rc.1: `PRERELEASE_NOT_CERTIFIED`; target `e209dbc6e744882ae6cd5fd2426302f07f647010`; stable promotion requires real migration/SHADOW/PRIMARY/load/soak evidence.
+- `PlexonJobs` 1.0.0-rc.1: `PRERELEASE`; target `e209dbc6e744882ae6cd5fd2426302f07f647010`; stable promotion requires real migration/SHADOW/PRIMARY/load/soak evidence.
 - `PlexonUtility` 1.0.0: `PLANNED_NOT_ACTIVE` for the production manifest. A source release exists, but Essentials command-ownership/decommission staging is explicitly unresolved.
 - `Plexon-DailyRewards`: `DEPRECATED` for this Core 2.0.4 ecosystem baseline; historical standalone release lineage only.
 - `PlexonGriefPreventionAddon` / `PlexonClaimFlags`: `DEPRECATED`; replaced by PlexonGPFlags. Historical 1.1.0 remains rollback-only and must not be deployed together with GPFlags.
