@@ -18,15 +18,30 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      - name: Resolve project version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "jar=target/PlexonCore-${VERSION}.jar" >> "$GITHUB_OUTPUT"
+          echo "notes=.release/${VERSION}.md" >> "$GITHUB_OUTPUT"
       - name: Verify release build
         run: mvn -B -ntp clean verify
+      - name: Verify release inputs
+        shell: bash
+        run: |
+          test -f "${{ steps.version.outputs.jar }}"
+          test -f "${{ steps.version.outputs.notes }}"
       - name: Generate checksum
-        run: sha256sum target/PlexonCore-2.0.0.jar > SHA256SUMS.txt
+        shell: bash
+        run: sha256sum "${{ steps.version.outputs.jar }}" > SHA256SUMS.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PlexonCore 2.0.0
-          body_path: .release/2.0.0.md
+          name: PlexonCore ${{ steps.version.outputs.version }}
+          body_path: ${{ steps.version.outputs.notes }}
           files: |
-            target/PlexonCore-2.0.0.jar
+            ${{ steps.version.outputs.jar }}
             SHA256SUMS.txt
