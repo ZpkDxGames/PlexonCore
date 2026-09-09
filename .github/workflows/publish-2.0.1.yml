@@ -1,0 +1,59 @@
+name: Publish PlexonCore 2.0.1
+
+on:
+  push:
+    branches:
+      - 'release/2.0.1-publish'
+    paths:
+      - '.github/workflows/publish-2.0.1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_COMMIT: 8d1556a7410ed7f918366d811315d12c9dc7f31a
+      RELEASE_VERSION: 2.0.1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Checkout exact released commit
+        run: git checkout "${RELEASE_COMMIT}"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Verify version and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+          test "${version}" = "${RELEASE_VERSION}"
+          mvn -B -ntp clean verify
+      - name: Verify JAR and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar_path="target/PlexonCore-${RELEASE_VERSION}.jar"
+          test -f "${jar_path}"
+          jar tf "${jar_path}" | grep -q 'plugin.yml'
+          jar tf "${jar_path}" | grep -q 'com/zpkdxgames/plexoncore/origin/BlockOriginService.class'
+          sha256sum "${jar_path}" > SHA256SUMS.txt
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gh release list --json tagName --jq '.[] | select(.tagName == "v'"${RELEASE_VERSION}"'") | .tagName')"
+          gh release create "v${RELEASE_VERSION}" \
+            "target/PlexonCore-${RELEASE_VERSION}.jar" \
+            SHA256SUMS.txt \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${RELEASE_COMMIT}" \
+            --title "PlexonCore ${RELEASE_VERSION}" \
+            --generate-notes
