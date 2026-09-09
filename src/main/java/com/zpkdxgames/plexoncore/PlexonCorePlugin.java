@@ -19,6 +19,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.event.server.PluginEnableEvent;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -91,18 +92,35 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         if (playerWatchService != null) playerWatchService.close();
+        if (moduleRegistry != null) moduleRegistry.clear();
         if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
         if (sqliteService != null) sqliteService.close();
         if (scheduler != null) scheduler.close();
     }
 
-    @EventHandler public void onPluginEnable(PluginEnableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
-    @EventHandler public void onPluginDisable(PluginDisableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
+    @EventHandler
+    public void onPluginEnable(PluginEnableEvent event) {
+        refreshDiscovery(event.getPlugin());
+    }
 
-    private void refreshDiscovery(String pluginName) {
+    @EventHandler
+    public void onPluginDisable(PluginDisableEvent event) {
+        Plugin disabled = event.getPlugin();
+        if (disabled == this) return;
+        if (moduleRegistry != null) moduleRegistry.unregisterOwnedBy(disabled);
+        refreshDiscovery(disabled);
+    }
+
+    private void refreshDiscovery(Plugin changedPlugin) {
+        String pluginName = changedPlugin.getName();
         if (pluginName.equalsIgnoreCase(getName())) return;
         if (pluginName.toLowerCase(java.util.Locale.ROOT).startsWith("plexon") || pluginName.equalsIgnoreCase("PlaceholderAPI") || pluginName.equalsIgnoreCase("Vault") || pluginName.equalsIgnoreCase("LuckPerms")) {
-            scheduler.runPrimary(() -> { moduleRegistry.discoverLegacy(Bukkit.getPluginManager()); integrationRegistry.refresh(); });
+            Runnable refresh = () -> {
+                moduleRegistry.discoverLegacy(Bukkit.getPluginManager());
+                integrationRegistry.refresh();
+            };
+            if (Bukkit.isPrimaryThread()) refresh.run();
+            else scheduler.runPrimary(refresh);
         }
     }
 

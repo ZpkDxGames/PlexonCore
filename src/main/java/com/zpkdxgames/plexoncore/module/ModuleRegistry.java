@@ -36,17 +36,28 @@ public final class ModuleRegistry {
         Objects.requireNonNull(descriptor, "descriptor");
         String id = normalizeId(descriptor.id());
         ModuleDescriptor normalized = descriptor.withId(id);
-        if (!isSupported(normalized.supportedCoreApi())) {
-            ModuleDescriptor incompatible = normalized.withState(ModuleState.INCOMPATIBLE,
-                "Requires Core API " + normalized.supportedCoreApi() + ", running " + coreVersion.apiVersion() + compatibilityDetail());
-            registered.put(id, incompatible);
-            legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
-            return new RegistrationResult(false, incompatible, "Core API range is incompatible");
+        boolean compatible = isSupported(normalized.supportedCoreApi());
+        ModuleDescriptor candidate = compatible ? normalized : normalized.withState(ModuleState.INCOMPATIBLE,
+            "Requires Core API " + normalized.supportedCoreApi() + ", running " + coreVersion.apiVersion() + compatibilityDetail());
+
+        while (true) {
+            ModuleDescriptor previous = registered.putIfAbsent(id, candidate);
+            if (previous == null) {
+                legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
+                return new RegistrationResult(compatible, candidate, compatible ? "Registered" : "Core API range is incompatible");
+            }
+
+            // A disabled owner must never block a fresh plugin instance from reclaiming its module id.
+            // This is a safety net in addition to PluginDisableEvent cleanup and protects hot-enable flows.
+            if (!previous.plugin().isEnabled() && registered.replace(id, previous, candidate)) {
+                legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
+                return new RegistrationResult(compatible, candidate,
+                    compatible ? "Replaced stale disabled owner" : "Core API range is incompatible");
+            }
+
+            // Never let a duplicate registration, including an incompatible one, overwrite a live owner.
+            return new RegistrationResult(false, previous, "Module id already registered: " + id);
         }
-        ModuleDescriptor previous = registered.putIfAbsent(id, normalized);
-        if (previous != null) return new RegistrationResult(false, previous, "Module id already registered: " + id);
-        legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
-        return new RegistrationResult(true, normalized, "Registered");
     }
 
     public boolean supportsApi(CoreVersion requested) {
@@ -68,21 +79,75 @@ public final class ModuleRegistry {
     }
 
     public Optional<ModuleDescriptor> unregister(String id) { return Optional.ofNullable(registered.remove(normalizeId(id))); }
-    public void updateState(String id, ModuleState state, String detail) { registered.computeIfPresent(normalizeId(id), (key, current) -> current.withState(state, detail)); }
+
+    /**
+     * Removes every module descriptor owned by the exact plugin instance.
+     * Identity comparison is intentional: after a hot re-enable, an old plugin instance must not
+     * be able to remove a descriptor registered by the new instance with the same plugin name.
+     */
+    public int unregisterOwnedBy(Plugin owner) {
+        if (owner == null) return 0;
+        int[] removed = {0};
+        registered.forEach((id, descriptor) -> {
+            if (descriptor.plugin() == owner && registered.remove(id, descriptor)) removed[0]++;
+        });
+        legacy.remove(owner.getName().toLowerCase(Locale.ROOT));
+        return removed[0];
+    }
+
+    /**
+     * Compatibility state update. First-party modules should prefer the ownership-aware overload
+     * whenever state can be completed from asynchronous initialization.
+     */
+    public void updateState(String id, ModuleState state, String detail) {
+        registered.computeIfPresent(normalizeId(id), (key, current) -> current.withState(state, detail));
+    }
+
+    /**
+     * Updates state only when the current module descriptor is still owned by the supplied plugin
+     * instance. This prevents a late callback from an old/disabled instance mutating a replacement
+     * module after hot enable or reload.
+     */
+    public boolean updateState(String id, Plugin owner, ModuleState state, String detail) {
+        Objects.requireNonNull(owner, "owner");
+        String normalizedId = normalizeId(id);
+        while (true) {
+            ModuleDescriptor current = registered.get(normalizedId);
+            if (current == null || current.plugin() != owner) return false;
+            ModuleDescriptor updated = current.withState(state, detail);
+            if (registered.replace(normalizedId, current, updated)) return true;
+        }
+    }
+
     public Optional<ModuleDescriptor> find(String id) { return Optional.ofNullable(registered.get(normalizeId(id))); }
     public Collection<ModuleDescriptor> registeredModules() { return registered.values().stream().sorted(Comparator.comparing(ModuleDescriptor::displayName)).toList(); }
     public Collection<LegacyModule> legacyModules() { return legacy.values().stream().sorted(Comparator.comparing(LegacyModule::pluginName)).toList(); }
 
     public void discoverLegacy(PluginManager pluginManager) {
-        Set<String> installed = new LinkedHashSet<>();
+        Set<String> installedAndEnabled = new LinkedHashSet<>();
         for (Plugin plugin : pluginManager.getPlugins()) {
             String name = plugin.getName();
             if (!name.toLowerCase(Locale.ROOT).startsWith("plexon") || name.equalsIgnoreCase("PlexonCore")) continue;
-            installed.add(name.toLowerCase(Locale.ROOT));
+            String key = name.toLowerCase(Locale.ROOT);
+
+            // Disabled plugins are not active legacy modules. Their registered descriptors are
+            // removed on PluginDisableEvent so diagnostics cannot retain a stale READY state.
+            if (!plugin.isEnabled()) {
+                legacy.remove(key);
+                continue;
+            }
+
+            installedAndEnabled.add(key);
             boolean isRegistered = registered.values().stream().anyMatch(d -> d.pluginName().equalsIgnoreCase(name));
-            if (!isRegistered) legacy.put(name.toLowerCase(Locale.ROOT), new LegacyModule(name, plugin.getPluginMeta().getVersion(), plugin.isEnabled(), Instant.now()));
+            if (!isRegistered) legacy.put(key, new LegacyModule(name, plugin.getPluginMeta().getVersion(), true, Instant.now()));
+            else legacy.remove(key);
         }
-        legacy.keySet().removeIf(key -> !installed.contains(key));
+        legacy.keySet().removeIf(key -> !installedAndEnabled.contains(key));
+    }
+
+    public void clear() {
+        registered.clear();
+        legacy.clear();
     }
 
     public int totalDetected() { return registered.size() + legacy.size(); }
