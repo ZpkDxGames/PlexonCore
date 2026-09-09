@@ -6,6 +6,7 @@ import com.zpkdxgames.plexoncore.context.CoreItemIdentity;
 import com.zpkdxgames.plexoncore.origin.BlockOriginService;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 public final class CoreEventGateway implements Listener {
@@ -28,6 +30,7 @@ public final class CoreEventGateway implements Listener {
     private final CoreRuntimeMetrics metrics = new CoreRuntimeMetrics();
     private final CoreItemIdentityResolver itemIdentityResolver = new CoreItemIdentityResolver(metrics);
     private final Map<String, Long> lastFailureLog = new ConcurrentHashMap<>();
+    private final AtomicLong eventSequence = new AtomicLong();
 
     public CoreEventGateway(Plugin plugin, BlockOriginService origins) {
         this.plugin = Objects.requireNonNull(plugin);
@@ -39,13 +42,8 @@ public final class CoreEventGateway implements Listener {
         return subscriptions.subscribe(moduleId, subscription, handler::handle);
     }
 
-    public CoreRuntimeMetrics.Snapshot metrics() {
-        return metrics.snapshot();
-    }
-
-    public int compiledBlockRoutes() {
-        return subscriptions.routeCount();
-    }
+    public CoreRuntimeMetrics.Snapshot metrics() { return metrics.snapshot(); }
+    public int compiledBlockRoutes() { return subscriptions.routeCount(); }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
@@ -61,45 +59,38 @@ public final class CoreEventGateway implements Listener {
         metrics.blockBreakRouted();
 
         long contextStart = System.nanoTime();
+        int x = block.getX(); int y = block.getY(); int z = block.getZ();
+        World world = block.getWorld();
+        UUID worldId = world.getUID();
         BlockOrigin origin = BlockOrigin.UNKNOWN;
         if (plan.requiresNaturalOrigin()) {
             metrics.originLookup();
-            origin = origins.origin(block);
+            origin = origins.origin(worldId, x, y, z);
         }
         Player player = event.getPlayer();
         CoreItemIdentity mainHand = plan.itemIdentityNamespaces().isEmpty()
             ? null
             : itemIdentityResolver.resolve(player.getInventory().getItemInMainHand(), plan.itemIdentityNamespaces());
         CoreBlockBreakContext context = new CoreBlockBreakContext(
-            UUID.randomUUID(), player.getUniqueId(), player.getName(), block.getWorld().getUID(), block.getWorld().getName(),
-            block.getX(), block.getY(), block.getZ(), material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime()
+            eventSequence.incrementAndGet(), player.getUniqueId(), player.getName(), worldId, world.getName(), x, y, z,
+            material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime()
         );
         metrics.contextCreated();
         metrics.contextNanos(System.nanoTime() - contextStart);
 
         long dispatchStart = System.nanoTime();
         for (SubscriptionRegistry.Subscriber subscriber : plan.subscribers()) {
-            try {
-                subscriber.handler().handle(context);
-            } catch (Throwable failure) {
-                metrics.moduleFailure();
-                rateLimitedFailure(subscriber.moduleId(), failure);
-            }
+            try { subscriber.handler().handle(context); }
+            catch (Throwable failure) { metrics.moduleFailure(); rateLimitedFailure(subscriber.moduleId(), failure); }
         }
         metrics.dispatchNanos(System.nanoTime() - dispatchStart);
         metrics.gatewayNanos(System.nanoTime() - gatewayStart);
     }
 
     private void rateLimitedFailure(String moduleId, Throwable failure) {
-        long now = System.nanoTime();
-        Long previous = lastFailureLog.put(moduleId, now);
-        if (previous == null || now - previous >= FAILURE_LOG_INTERVAL_NANOS) {
-            plugin.getLogger().log(Level.SEVERE, "Core event subscriber failed: " + moduleId, failure);
-        }
+        long now = System.nanoTime(); Long previous = lastFailureLog.put(moduleId, now);
+        if (previous == null || now - previous >= FAILURE_LOG_INTERVAL_NANOS) plugin.getLogger().log(Level.SEVERE, "Core event subscriber failed: " + moduleId, failure);
     }
 
-    @FunctionalInterface
-    public interface BlockBreakHandler {
-        void handle(CoreBlockBreakContext context);
-    }
+    @FunctionalInterface public interface BlockBreakHandler { void handle(CoreBlockBreakContext context); }
 }

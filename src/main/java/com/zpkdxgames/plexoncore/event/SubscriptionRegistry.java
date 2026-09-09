@@ -4,18 +4,19 @@ import com.zpkdxgames.plexoncore.context.CoreBlockBreakContext;
 import org.bukkit.Material;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class SubscriptionRegistry {
-    private final Map<Material, List<Subscriber>> mutableRoutes = new ConcurrentHashMap<>();
-    private final Map<Material, RoutePlan> compiledRoutes = new ConcurrentHashMap<>();
+    private final Map<Material, List<Subscriber>> mutableRoutes = new EnumMap<>(Material.class);
+    private final RoutePlan[] compiledRoutes = new RoutePlan[Material.values().length];
+    private volatile int routeCount;
 
     synchronized SubscriptionHandle subscribe(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
         String normalized = normalizeModuleId(moduleId);
@@ -30,12 +31,11 @@ final class SubscriptionRegistry {
     }
 
     RoutePlan plan(Material material) {
-        return compiledRoutes.getOrDefault(material, RoutePlan.EMPTY);
+        RoutePlan plan = compiledRoutes[material.ordinal()];
+        return plan == null ? RoutePlan.EMPTY : plan;
     }
 
-    int routeCount() {
-        return compiledRoutes.size();
-    }
+    int routeCount() { return routeCount; }
 
     private synchronized void unsubscribe(Subscriber subscriber) {
         for (Material material : subscriber.subscription().materials()) {
@@ -45,7 +45,8 @@ final class SubscriptionRegistry {
             next.remove(subscriber);
             if (next.isEmpty()) {
                 mutableRoutes.remove(material);
-                compiledRoutes.remove(material);
+                if (compiledRoutes[material.ordinal()] != null) routeCount--;
+                compiledRoutes[material.ordinal()] = null;
             } else {
                 mutableRoutes.put(material, next);
                 compile(material, next);
@@ -60,7 +61,8 @@ final class SubscriptionRegistry {
             origin |= subscriber.subscription().requiresNaturalOrigin();
             namespaces.addAll(subscriber.subscription().itemIdentityNamespaces());
         }
-        compiledRoutes.put(material, new RoutePlan(List.copyOf(subscribers), origin, Set.copyOf(namespaces)));
+        if (compiledRoutes[material.ordinal()] == null) routeCount++;
+        compiledRoutes[material.ordinal()] = new RoutePlan(List.copyOf(subscribers), origin, Set.copyOf(namespaces));
     }
 
     private static String normalizeModuleId(String value) {
@@ -69,13 +71,8 @@ final class SubscriptionRegistry {
         return normalized;
     }
 
-    @FunctionalInterface
-    interface CoreBlockBreakHandler {
-        void handle(CoreBlockBreakContext context);
-    }
-
+    @FunctionalInterface interface CoreBlockBreakHandler { void handle(CoreBlockBreakContext context); }
     record Subscriber(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {}
-
     record RoutePlan(List<Subscriber> subscribers, boolean requiresNaturalOrigin, Set<String> itemIdentityNamespaces) {
         static final RoutePlan EMPTY = new RoutePlan(List.of(), false, Set.of());
         boolean empty() { return subscribers.isEmpty(); }

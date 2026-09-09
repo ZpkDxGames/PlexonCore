@@ -47,10 +47,7 @@ public final class BlockOriginService implements Listener {
     private volatile SqliteDatabase database;
     private volatile Throwable persistenceFailure;
 
-    public BlockOriginService(Plugin plugin, CoreScheduler scheduler) {
-        this.plugin = Objects.requireNonNull(plugin);
-        this.scheduler = Objects.requireNonNull(scheduler);
-    }
+    public BlockOriginService(Plugin plugin, CoreScheduler scheduler) { this.plugin = Objects.requireNonNull(plugin); this.scheduler = Objects.requireNonNull(scheduler); }
 
     public void start(SqliteService sqlite, Path databasePath) {
         try {
@@ -61,33 +58,22 @@ public final class BlockOriginService implements Listener {
                     statement.execute("CREATE INDEX IF NOT EXISTS idx_core_block_origin_chunk ON core_block_origin(world_id, chunk_x, chunk_z)");
                 }
             }))).whenComplete((version, error) -> {
-                if (error != null) {
-                    persistenceFailure = unwrap(error);
-                    plugin.getLogger().severe("Block origin persistence unavailable: " + persistenceFailure.getMessage());
-                    return;
-                }
+                if (error != null) { persistenceFailure = unwrap(error); plugin.getLogger().severe("Block origin persistence unavailable: " + persistenceFailure.getMessage()); return; }
                 persistenceReady.set(true);
                 flushPendingMutations().whenComplete((ignored, flushError) -> {
-                    if (flushError != null) {
-                        persistenceFailure = unwrap(flushError);
-                        persistenceReady.set(false);
-                        plugin.getLogger().severe("Block origin pre-load mutation flush failed: " + persistenceFailure.getMessage());
-                        return;
-                    }
+                    if (flushError != null) { persistenceFailure = unwrap(flushError); persistenceReady.set(false); plugin.getLogger().severe("Block origin pre-load mutation flush failed: " + persistenceFailure.getMessage()); return; }
                     scheduler.runPrimary(this::loadCurrentlyLoadedChunks);
                 });
             });
-        } catch (Exception error) {
-            persistenceFailure = error;
-            plugin.getLogger().severe("Block origin database could not be opened: " + error.getMessage());
-        }
+        } catch (Exception error) { persistenceFailure = error; plugin.getLogger().severe("Block origin database could not be opened: " + error.getMessage()); }
     }
 
-    public BlockOrigin origin(Block block) {
-        ChunkKey key = key(block.getWorld().getUID(), block.getChunk().getX(), block.getChunk().getZ());
-        ChunkState state = chunks.get(key);
+    public BlockOrigin origin(Block block) { return origin(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ()); }
+
+    public BlockOrigin origin(UUID worldId, int x, int y, int z) {
+        ChunkState state = chunks.get(key(worldId, x >> 4, z >> 4));
         if (state == null) return BlockOrigin.UNKNOWN;
-        long packed = pack(block.getX(), block.getY(), block.getZ());
+        long packed = pack(x, y, z);
         if (state.playerPlaced.contains(packed)) return BlockOrigin.PLAYER_PLACED;
         return state.loadedFromPersistence ? BlockOrigin.NATURAL : BlockOrigin.UNKNOWN;
     }
@@ -95,41 +81,21 @@ public final class BlockOriginService implements Listener {
     public Stats stats() {
         long tracked = chunks.values().stream().mapToLong(state -> state.playerPlaced.size()).sum();
         long loaded = chunks.values().stream().filter(state -> state.loadedFromPersistence).count();
-        return new Stats(chunks.size(), loaded, chunks.size() - loaded, tracked,
-            database == null ? 0 : database.queuedWrites(), persistenceReady.get(), persistenceFailure == null ? null : persistenceFailure.getMessage());
+        return new Stats(chunks.size(), loaded, chunks.size() - loaded, tracked, database == null ? 0 : database.queuedWrites(), persistenceReady.get(), persistenceFailure == null ? null : persistenceFailure.getMessage());
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPlace(BlockPlaceEvent event) { markPlaced(event.getBlockPlaced()); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBreak(BlockBreakEvent event) { removeTracked(List.of(event.getBlock())); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBurn(BlockBurnEvent event) { removeTracked(List.of(event.getBlock())); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onFade(BlockFadeEvent event) { removeTracked(List.of(event.getBlock())); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBlockExplode(BlockExplodeEvent event) { removeTracked(event.blockList()); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onEntityExplode(EntityExplodeEvent event) { removeTracked(event.blockList()); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPistonExtend(BlockPistonExtendEvent event) { moveTracked(event.getBlocks(), event.getDirection()); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPistonRetract(BlockPistonRetractEvent event) { moveTracked(event.getBlocks(), event.getDirection().getOppositeFace()); }
-
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onPlace(BlockPlaceEvent event) { markPlaced(event.getBlockPlaced()); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onBreak(BlockBreakEvent event) { removeTracked(List.of(event.getBlock())); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onBurn(BlockBurnEvent event) { removeTracked(List.of(event.getBlock())); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onFade(BlockFadeEvent event) { removeTracked(List.of(event.getBlock())); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onBlockExplode(BlockExplodeEvent event) { removeTracked(event.blockList()); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onEntityExplode(EntityExplodeEvent event) { removeTracked(event.blockList()); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onPistonExtend(BlockPistonExtendEvent event) { moveTracked(event.getBlocks(), event.getDirection()); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true) public void onPistonRetract(BlockPistonRetractEvent event) { moveTracked(event.getBlocks(), event.getDirection().getOppositeFace()); }
     @EventHandler public void onChunkLoad(ChunkLoadEvent event) { loadChunk(event.getChunk()); }
-
     @EventHandler public void onChunkUnload(ChunkUnloadEvent event) { chunks.remove(key(event.getWorld().getUID(), event.getChunk().getX(), event.getChunk().getZ())); }
 
-    private void loadCurrentlyLoadedChunks() {
-        for (World world : Bukkit.getWorlds()) for (Chunk chunk : world.getLoadedChunks()) loadChunk(chunk);
-    }
+    private void loadCurrentlyLoadedChunks() { for (World world : Bukkit.getWorlds()) for (Chunk chunk : world.getLoadedChunks()) loadChunk(chunk); }
 
     private void loadChunk(Chunk chunk) {
         ChunkKey key = key(chunk.getWorld().getUID(), chunk.getX(), chunk.getZ());
@@ -144,34 +110,18 @@ public final class BlockOriginService implements Listener {
                 return positions;
             } catch (Exception error) { throw new IllegalStateException(error); }
         }).whenComplete((positions, error) -> {
-            if (error != null) {
-                state.loading = false;
-                persistenceFailure = unwrap(error);
-                return;
-            }
+            if (error != null) { state.loading = false; persistenceFailure = unwrap(error); return; }
             synchronized (state) {
-                state.playerPlaced.addAll(positions);
-                state.playerPlaced.removeAll(state.removedBeforeLoad);
-                state.playerPlaced.addAll(state.addedBeforeLoad);
-                state.loadedFromPersistence = true;
-                state.loading = false;
-                state.removedBeforeLoad.clear();
-                state.addedBeforeLoad.clear();
+                state.playerPlaced.addAll(positions); state.playerPlaced.removeAll(state.removedBeforeLoad); state.playerPlaced.addAll(state.addedBeforeLoad);
+                state.loadedFromPersistence = true; state.loading = false; state.removedBeforeLoad.clear(); state.addedBeforeLoad.clear();
             }
         });
     }
 
     private void markPlaced(Block block) {
-        ChunkKey key = key(block.getWorld().getUID(), block.getChunk().getX(), block.getChunk().getZ());
-        long packed = pack(block.getX(), block.getY(), block.getZ());
+        ChunkKey key = key(block.getWorld().getUID(), block.getX() >> 4, block.getZ() >> 4); long packed = pack(block.getX(), block.getY(), block.getZ());
         ChunkState state = chunks.computeIfAbsent(key, ignored -> new ChunkState());
-        synchronized (state) {
-            state.playerPlaced.add(packed);
-            if (!state.loadedFromPersistence) {
-                state.addedBeforeLoad.add(packed);
-                state.removedBeforeLoad.remove(packed);
-            }
-        }
+        synchronized (state) { state.playerPlaced.add(packed); if (!state.loadedFromPersistence) { state.addedBeforeLoad.add(packed); state.removedBeforeLoad.remove(packed); } }
         insertPositions(List.of(new Position(key, packed)));
     }
 
@@ -179,18 +129,8 @@ public final class BlockOriginService implements Listener {
         if (blocks == null || blocks.isEmpty()) return;
         List<Position> removed = new ArrayList<>();
         for (Block block : blocks) {
-            ChunkKey key = key(block.getWorld().getUID(), block.getChunk().getX(), block.getChunk().getZ());
-            ChunkState state = chunks.computeIfAbsent(key, ignored -> new ChunkState());
-            long packed = pack(block.getX(), block.getY(), block.getZ());
-            boolean persistDelete;
-            synchronized (state) {
-                boolean wasPlaced = state.playerPlaced.remove(packed);
-                if (!state.loadedFromPersistence) {
-                    state.removedBeforeLoad.add(packed);
-                    state.addedBeforeLoad.remove(packed);
-                    persistDelete = true;
-                } else persistDelete = wasPlaced;
-            }
+            ChunkKey key = key(block.getWorld().getUID(), block.getX() >> 4, block.getZ() >> 4); ChunkState state = chunks.computeIfAbsent(key, ignored -> new ChunkState()); long packed = pack(block.getX(), block.getY(), block.getZ()); boolean persistDelete;
+            synchronized (state) { boolean wasPlaced = state.playerPlaced.remove(packed); if (!state.loadedFromPersistence) { state.removedBeforeLoad.add(packed); state.addedBeforeLoad.remove(packed); persistDelete = true; } else persistDelete = wasPlaced; }
             if (persistDelete) removed.add(new Position(key, packed));
         }
         deletePositions(removed);
@@ -200,120 +140,38 @@ public final class BlockOriginService implements Listener {
         if (blocks == null || blocks.isEmpty()) return;
         List<Move> moves = new ArrayList<>();
         for (Block source : blocks) {
-            ChunkKey sourceKey = key(source.getWorld().getUID(), source.getChunk().getX(), source.getChunk().getZ());
-            ChunkState sourceState = chunks.computeIfAbsent(sourceKey, ignored -> new ChunkState());
-            long sourcePacked = pack(source.getX(), source.getY(), source.getZ());
-            boolean moveAsPlaced;
-            synchronized (sourceState) {
-                boolean knownPlaced = sourceState.playerPlaced.remove(sourcePacked);
-                moveAsPlaced = knownPlaced || !sourceState.loadedFromPersistence;
-                if (!sourceState.loadedFromPersistence) {
-                    sourceState.removedBeforeLoad.add(sourcePacked);
-                    sourceState.addedBeforeLoad.remove(sourcePacked);
-                }
-            }
+            ChunkKey sourceKey = key(source.getWorld().getUID(), source.getX() >> 4, source.getZ() >> 4); ChunkState sourceState = chunks.computeIfAbsent(sourceKey, ignored -> new ChunkState()); long sourcePacked = pack(source.getX(), source.getY(), source.getZ()); boolean moveAsPlaced;
+            synchronized (sourceState) { boolean knownPlaced = sourceState.playerPlaced.remove(sourcePacked); moveAsPlaced = knownPlaced || !sourceState.loadedFromPersistence; if (!sourceState.loadedFromPersistence) { sourceState.removedBeforeLoad.add(sourcePacked); sourceState.addedBeforeLoad.remove(sourcePacked); } }
             if (!moveAsPlaced) continue;
-            Block destination = source.getRelative(movement);
-            ChunkKey destinationKey = key(destination.getWorld().getUID(), destination.getChunk().getX(), destination.getChunk().getZ());
-            long destinationPacked = pack(destination.getX(), destination.getY(), destination.getZ());
-            ChunkState destinationState = chunks.computeIfAbsent(destinationKey, ignored -> new ChunkState());
-            synchronized (destinationState) {
-                destinationState.playerPlaced.add(destinationPacked);
-                if (!destinationState.loadedFromPersistence) {
-                    destinationState.addedBeforeLoad.add(destinationPacked);
-                    destinationState.removedBeforeLoad.remove(destinationPacked);
-                }
-            }
+            Block destination = source.getRelative(movement); ChunkKey destinationKey = key(destination.getWorld().getUID(), destination.getX() >> 4, destination.getZ() >> 4); long destinationPacked = pack(destination.getX(), destination.getY(), destination.getZ()); ChunkState destinationState = chunks.computeIfAbsent(destinationKey, ignored -> new ChunkState());
+            synchronized (destinationState) { destinationState.playerPlaced.add(destinationPacked); if (!destinationState.loadedFromPersistence) { destinationState.addedBeforeLoad.add(destinationPacked); destinationState.removedBeforeLoad.remove(destinationPacked); } }
             moves.add(new Move(new Position(sourceKey, sourcePacked), new Position(destinationKey, destinationPacked)));
         }
         persistMoves(moves);
     }
 
     private CompletableFuture<Void> flushPendingMutations() {
-        List<Position> inserts = new ArrayList<>();
-        List<Position> deletes = new ArrayList<>();
-        chunks.forEach((key, state) -> {
-            synchronized (state) {
-                state.addedBeforeLoad.forEach(packed -> inserts.add(new Position(key, packed)));
-                state.removedBeforeLoad.forEach(packed -> deletes.add(new Position(key, packed)));
-            }
-        });
-        SqliteDatabase db = database;
-        if (db == null || (inserts.isEmpty() && deletes.isEmpty())) return CompletableFuture.completedFuture(null);
+        List<Position> inserts = new ArrayList<>(); List<Position> deletes = new ArrayList<>();
+        chunks.forEach((key, state) -> { synchronized (state) { state.addedBeforeLoad.forEach(packed -> inserts.add(new Position(key, packed))); state.removedBeforeLoad.forEach(packed -> deletes.add(new Position(key, packed))); } });
+        SqliteDatabase db = database; if (db == null || (inserts.isEmpty() && deletes.isEmpty())) return CompletableFuture.completedFuture(null);
         return db.executeWrite(connection -> {
-            if (!deletes.isEmpty()) {
-                try (PreparedStatement ps = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?")) {
-                    for (Position position : deletes) { bind(ps, position.key, position.packed); ps.addBatch(); }
-                    ps.executeBatch();
-                }
-            }
-            if (!inserts.isEmpty()) {
-                try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) {
-                    for (Position position : inserts) { bind(ps, position.key, position.packed); ps.addBatch(); }
-                    ps.executeBatch();
-                }
-            }
+            if (!deletes.isEmpty()) try (PreparedStatement ps = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?")) { for (Position position : deletes) { bind(ps, position.key, position.packed); ps.addBatch(); } ps.executeBatch(); }
+            if (!inserts.isEmpty()) try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) { for (Position position : inserts) { bind(ps, position.key, position.packed); ps.addBatch(); } ps.executeBatch(); }
         });
     }
 
-    private void insertPositions(List<Position> positions) {
-        SqliteDatabase db = database;
-        if (positions.isEmpty() || db == null || !persistenceReady.get()) return;
-        db.executeWrite(connection -> {
-            try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) {
-                for (Position position : positions) { bind(ps, position.key, position.packed); ps.addBatch(); }
-                ps.executeBatch();
-            }
-        });
-    }
+    private void insertPositions(List<Position> positions) { SqliteDatabase db = database; if (positions.isEmpty() || db == null || !persistenceReady.get()) return; db.executeWrite(connection -> { try (PreparedStatement ps = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) { for (Position position : positions) { bind(ps, position.key, position.packed); ps.addBatch(); } ps.executeBatch(); } }); }
+    private void deletePositions(List<Position> positions) { SqliteDatabase db = database; if (positions.isEmpty() || db == null || !persistenceReady.get()) return; db.executeWrite(connection -> { try (PreparedStatement ps = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?")) { for (Position position : positions) { bind(ps, position.key, position.packed); ps.addBatch(); } ps.executeBatch(); } }); }
+    private void persistMoves(List<Move> moves) { SqliteDatabase db = database; if (moves.isEmpty() || db == null || !persistenceReady.get()) return; db.executeWrite(connection -> { try (PreparedStatement delete = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?"); PreparedStatement insert = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) { for (Move move : moves) { bind(delete, move.from.key, move.from.packed); delete.addBatch(); bind(insert, move.to.key, move.to.packed); insert.addBatch(); } delete.executeBatch(); insert.executeBatch(); } }); }
 
-    private void deletePositions(List<Position> positions) {
-        SqliteDatabase db = database;
-        if (positions.isEmpty() || db == null || !persistenceReady.get()) return;
-        db.executeWrite(connection -> {
-            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?")) {
-                for (Position position : positions) { bind(ps, position.key, position.packed); ps.addBatch(); }
-                ps.executeBatch();
-            }
-        });
-    }
-
-    private void persistMoves(List<Move> moves) {
-        SqliteDatabase db = database;
-        if (moves.isEmpty() || db == null || !persistenceReady.get()) return;
-        db.executeWrite(connection -> {
-            try (PreparedStatement delete = connection.prepareStatement("DELETE FROM core_block_origin WHERE world_id=? AND chunk_x=? AND chunk_z=? AND packed_pos=?");
-                 PreparedStatement insert = connection.prepareStatement("INSERT OR IGNORE INTO core_block_origin(world_id,chunk_x,chunk_z,packed_pos) VALUES(?,?,?,?)")) {
-                for (Move move : moves) {
-                    bind(delete, move.from.key, move.from.packed); delete.addBatch();
-                    bind(insert, move.to.key, move.to.packed); insert.addBatch();
-                }
-                delete.executeBatch(); insert.executeBatch();
-            }
-        });
-    }
-
-    private static void bind(PreparedStatement ps, ChunkKey key, long packed) throws Exception {
-        ps.setString(1, key.worldId.toString()); ps.setInt(2, key.chunkX); ps.setInt(3, key.chunkZ); ps.setLong(4, packed);
-    }
-
+    private static void bind(PreparedStatement ps, ChunkKey key, long packed) throws Exception { ps.setString(1, key.worldId.toString()); ps.setInt(2, key.chunkX); ps.setInt(3, key.chunkZ); ps.setLong(4, packed); }
     private static ChunkKey key(UUID worldId, int chunkX, int chunkZ) { return new ChunkKey(worldId, chunkX, chunkZ); }
-
     static long pack(int x, int y, int z) { return ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | (y & 0xFFFL); }
-
     private static Throwable unwrap(Throwable error) { return error instanceof java.util.concurrent.CompletionException && error.getCause() != null ? error.getCause() : error; }
 
     private record ChunkKey(UUID worldId, int chunkX, int chunkZ) {}
     private record Position(ChunkKey key, long packed) {}
     private record Move(Position from, Position to) {}
-    private static final class ChunkState {
-        private final Set<Long> playerPlaced = ConcurrentHashMap.newKeySet();
-        private final Set<Long> addedBeforeLoad = ConcurrentHashMap.newKeySet();
-        private final Set<Long> removedBeforeLoad = ConcurrentHashMap.newKeySet();
-        private volatile boolean loading;
-        private volatile boolean loadedFromPersistence;
-    }
-
-    public record Stats(long cachedChunks, long knownChunks, long unknownChunks, long trackedPlacedBlocks,
-                        int pendingWrites, boolean persistenceReady, String persistenceError) {}
+    private static final class ChunkState { private final Set<Long> playerPlaced = ConcurrentHashMap.newKeySet(); private final Set<Long> addedBeforeLoad = ConcurrentHashMap.newKeySet(); private final Set<Long> removedBeforeLoad = ConcurrentHashMap.newKeySet(); private volatile boolean loading; private volatile boolean loadedFromPersistence; }
+    public record Stats(long cachedChunks, long knownChunks, long unknownChunks, long trackedPlacedBlocks, int pendingWrites, boolean persistenceReady, String persistenceError) {}
 }
