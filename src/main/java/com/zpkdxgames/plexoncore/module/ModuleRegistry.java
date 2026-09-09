@@ -36,28 +36,26 @@ public final class ModuleRegistry {
         Objects.requireNonNull(descriptor, "descriptor");
         String id = normalizeId(descriptor.id());
         ModuleDescriptor normalized = descriptor.withId(id);
-        if (!isSupported(normalized.supportedCoreApi())) {
-            ModuleDescriptor incompatible = normalized.withState(ModuleState.INCOMPATIBLE,
-                "Requires Core API " + normalized.supportedCoreApi() + ", running " + coreVersion.apiVersion() + compatibilityDetail());
-            registered.put(id, incompatible);
-            legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
-            return new RegistrationResult(false, incompatible, "Core API range is incompatible");
-        }
+        boolean compatible = isSupported(normalized.supportedCoreApi());
+        ModuleDescriptor candidate = compatible ? normalized : normalized.withState(ModuleState.INCOMPATIBLE,
+            "Requires Core API " + normalized.supportedCoreApi() + ", running " + coreVersion.apiVersion() + compatibilityDetail());
 
         while (true) {
-            ModuleDescriptor previous = registered.putIfAbsent(id, normalized);
+            ModuleDescriptor previous = registered.putIfAbsent(id, candidate);
             if (previous == null) {
                 legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
-                return new RegistrationResult(true, normalized, "Registered");
+                return new RegistrationResult(compatible, candidate, compatible ? "Registered" : "Core API range is incompatible");
             }
 
             // A disabled owner must never block a fresh plugin instance from reclaiming its module id.
             // This is a safety net in addition to PluginDisableEvent cleanup and protects hot-enable flows.
-            if (!previous.plugin().isEnabled() && registered.replace(id, previous, normalized)) {
+            if (!previous.plugin().isEnabled() && registered.replace(id, previous, candidate)) {
                 legacy.remove(normalized.pluginName().toLowerCase(Locale.ROOT));
-                return new RegistrationResult(true, normalized, "Replaced stale disabled owner");
+                return new RegistrationResult(compatible, candidate,
+                    compatible ? "Replaced stale disabled owner" : "Core API range is incompatible");
             }
 
+            // Never let a duplicate registration, including an incompatible one, overwrite a live owner.
             return new RegistrationResult(false, previous, "Module id already registered: " + id);
         }
     }
