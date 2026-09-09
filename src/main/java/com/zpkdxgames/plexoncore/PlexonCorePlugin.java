@@ -61,7 +61,7 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         blockOriginService = new BlockOriginService(this, scheduler);
         blockOriginService.start(sqliteService, getDataFolder().toPath().resolve("core-origin.db"));
         eventGateway = new CoreEventGateway(this, blockOriginService);
-        diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService, scheduler, guiService, textService);
+        diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService, scheduler, guiService, textService, eventGateway, blockOriginService);
 
         moduleRegistry.discoverLegacy(getServer().getPluginManager());
         integrationRegistry.refresh();
@@ -82,13 +82,7 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         getLogger().info("Integrations ready: " + ready);
     }
 
-    @Override
-    public void onDisable() {
-        if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
-        if (sqliteService != null) sqliteService.close();
-        if (scheduler != null) scheduler.close();
-    }
-
+    @Override public void onDisable() { if (getServer() != null) getServer().getServicesManager().unregisterAll(this); if (sqliteService != null) sqliteService.close(); if (scheduler != null) scheduler.close(); }
     @EventHandler public void onPluginEnable(PluginEnableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
     @EventHandler public void onPluginDisable(PluginDisableEvent event) { refreshDiscovery(event.getPlugin().getName()); }
 

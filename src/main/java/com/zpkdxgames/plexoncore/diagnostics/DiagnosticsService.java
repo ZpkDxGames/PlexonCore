@@ -2,11 +2,13 @@ package com.zpkdxgames.plexoncore.diagnostics;
 
 import com.zpkdxgames.plexoncore.api.PlexonCoreAPI.CoreVersion;
 import com.zpkdxgames.plexoncore.config.ConfigService;
+import com.zpkdxgames.plexoncore.event.CoreEventGateway;
 import com.zpkdxgames.plexoncore.gui.GuiService;
 import com.zpkdxgames.plexoncore.integration.IntegrationRegistry;
 import com.zpkdxgames.plexoncore.integration.IntegrationRegistry.IntegrationState;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleState;
+import com.zpkdxgames.plexoncore.origin.BlockOriginService;
 import com.zpkdxgames.plexoncore.scheduler.CoreScheduler;
 import com.zpkdxgames.plexoncore.text.TextService;
 import net.kyori.adventure.text.Component;
@@ -38,10 +40,18 @@ public final class DiagnosticsService implements CommandExecutor, TabCompleter {
     private final CoreScheduler scheduler;
     private final GuiService gui;
     private final TextService text;
+    private final CoreEventGateway events;
+    private final BlockOriginService origins;
     private final List<String> startupWarnings = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public DiagnosticsService(Plugin plugin, CoreVersion version, ModuleRegistry modules, IntegrationRegistry integrations,
                               ConfigService configs, CoreScheduler scheduler, GuiService gui, TextService text) {
+        this(plugin, version, modules, integrations, configs, scheduler, gui, text, null, null);
+    }
+
+    public DiagnosticsService(Plugin plugin, CoreVersion version, ModuleRegistry modules, IntegrationRegistry integrations,
+                              ConfigService configs, CoreScheduler scheduler, GuiService gui, TextService text,
+                              CoreEventGateway events, BlockOriginService origins) {
         this.plugin = Objects.requireNonNull(plugin);
         this.version = Objects.requireNonNull(version);
         this.modules = Objects.requireNonNull(modules);
@@ -50,6 +60,8 @@ public final class DiagnosticsService implements CommandExecutor, TabCompleter {
         this.scheduler = Objects.requireNonNull(scheduler);
         this.gui = Objects.requireNonNull(gui);
         this.text = Objects.requireNonNull(text);
+        this.events = events;
+        this.origins = origins;
     }
 
     public DiagnosticsSnapshot snapshot() {
@@ -65,26 +77,21 @@ public final class DiagnosticsService implements CommandExecutor, TabCompleter {
         );
     }
 
-    public void warning(String warning) {
-        if (warning != null && !warning.isBlank() && !startupWarnings.contains(warning)) startupWarnings.add(warning);
-    }
+    public void warning(String warning) { if (warning != null && !warning.isBlank() && !startupWarnings.contains(warning)) startupWarnings.add(warning); }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 0) {
-            if (sender instanceof Player player) openOverview(player);
-            else sendStatus(sender);
-            return true;
-        }
+        if (args.length == 0) { if (sender instanceof Player player) openOverview(player); else sendStatus(sender); return true; }
         String sub = args[0].toLowerCase(Locale.ROOT);
         return switch (sub) {
             case "status" -> withPermission(sender, "plexoncore.admin.status", () -> sendStatus(sender));
             case "modules" -> withPermission(sender, "plexoncore.admin.modules", () -> sendModules(sender));
             case "integrations" -> withPermission(sender, "plexoncore.admin.integrations", () -> sendIntegrations(sender));
             case "diagnostics" -> withPermission(sender, "plexoncore.admin.diagnostics", () -> sendDiagnostics(sender));
+            case "perf" -> withPermission(sender, "plexoncore.admin.diagnostics", () -> sendPerf(sender));
             case "version" -> { sendVersion(sender); yield true; }
             case "reload" -> withPermission(sender, "plexoncore.admin.reload", () -> reload(sender));
-            default -> { send(sender, "<gray>Usage: <white>/plexon [status|modules|integrations|diagnostics|version|reload]</white>"); yield true; }
+            default -> { send(sender, "<gray>Usage: <white>/plexon [status|modules|integrations|diagnostics|perf|version|reload]</white>"); yield true; }
         };
     }
 
@@ -95,38 +102,28 @@ public final class DiagnosticsService implements CommandExecutor, TabCompleter {
             "<gray>Plugin:</gray> <white>" + version.pluginVersion() + "</white>",
             "<gray>API:</gray> <white>" + version.apiVersion() + "</white>",
             "<gray>Health:</gray> " + healthColor(snapshot().health()) + snapshot().health()), click -> {});
-
         int slot = 10;
         for (var module : modules.registeredModules()) {
             if (slot >= 44) break;
             builder.button(slot++, icon(materialFor(module.id()), "<white><bold>" + escape(module.displayName()) + "</bold>",
-                "<gray>Version:</gray> <white>" + escape(module.version()) + "</white>",
-                "<gray>Mode:</gray> <aqua>Core API</aqua>",
+                "<gray>Version:</gray> <white>" + escape(module.version()) + "</white>", "<gray>Mode:</gray> <aqua>Core API</aqua>",
                 "<gray>State:</gray> " + stateColor(module.state()) + module.state()), click -> {});
         }
         for (var legacy : modules.legacyModules()) {
             if (slot >= 44) break;
             builder.button(slot++, icon(materialFor(legacy.pluginName()), "<white><bold>" + escape(legacy.pluginName()) + "</bold>",
-                "<gray>Version:</gray> <white>" + escape(legacy.version()) + "</white>",
-                "<gray>Mode:</gray> <yellow>Legacy / Standalone</yellow>",
+                "<gray>Version:</gray> <white>" + escape(legacy.version()) + "</white>", "<gray>Mode:</gray> <yellow>Legacy / Standalone</yellow>",
                 "<gray>Enabled:</gray> " + (legacy.enabled() ? "<green>yes" : "<red>no")), click -> {});
         }
         builder.button(49, icon(Material.COMPARATOR, "<aqua><bold>Diagnostics</bold>",
-            "<gray>Modules:</gray> <white>" + modules.totalDetected() + "</white>",
-            "<gray>Integrations:</gray> <white>" + integrations.all().size() + "</white>",
-            "<gray>Async queue:</gray> <white>" + scheduler.queueSize() + "</white>"), click -> sendDiagnostics(click.player()));
+            "<gray>Modules:</gray> <white>" + modules.totalDetected() + "</white>", "<gray>Integrations:</gray> <white>" + integrations.all().size() + "</white>",
+            "<gray>Compute queue:</gray> <white>" + scheduler.computeQueueSize() + "</white>", "<gray>IO queue:</gray> <white>" + scheduler.ioQueueSize() + "</white>"), click -> sendDiagnostics(click.player()));
         builder.open(player);
     }
 
     private ItemStack icon(Material material, String name, String... lore) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        meta.displayName(text.render(TextService.TextMode.MINIMESSAGE, name));
-        List<Component> lines = new ArrayList<>();
-        for (String line : lore) lines.add(text.render(TextService.TextMode.MINIMESSAGE, line));
-        meta.lore(lines);
-        item.setItemMeta(meta);
-        return item;
+        ItemStack item = new ItemStack(material); ItemMeta meta = item.getItemMeta(); meta.displayName(text.render(TextService.TextMode.MINIMESSAGE, name));
+        List<Component> lines = new ArrayList<>(); for (String line : lore) lines.add(text.render(TextService.TextMode.MINIMESSAGE, line)); meta.lore(lines); item.setItemMeta(meta); return item;
     }
 
     private void sendStatus(CommandSender sender) {
@@ -142,77 +139,64 @@ public final class DiagnosticsService implements CommandExecutor, TabCompleter {
         modules.legacyModules().forEach(module -> send(sender, "<yellow>" + escape(module.pluginName()) + "</yellow> <dark_gray>— Legacy/Standalone | " + escape(module.version()) + "</dark_gray>"));
     }
 
-    private void sendIntegrations(CommandSender sender) {
-        integrations.all().forEach(integration -> send(sender, "<white>" + integration.id() + "</white> <dark_gray>—</dark_gray> " + integrationColor(integration.state()) + integration.state() + " <dark_gray>| " + escape(integration.provider()) + " " + escape(integration.version()) + "</dark_gray>"));
-    }
+    private void sendIntegrations(CommandSender sender) { integrations.all().forEach(integration -> send(sender, "<white>" + integration.id() + "</white> <dark_gray>—</dark_gray> " + integrationColor(integration.state()) + integration.state() + " <dark_gray>| " + escape(integration.provider()) + " " + escape(integration.version()) + "</dark_gray>")); }
 
     private void sendDiagnostics(CommandSender sender) {
         DiagnosticsSnapshot snap = snapshot();
-        send(sender, "<gray>Plugin/API:</gray> <white>" + snap.pluginVersion() + " / " + snap.apiVersion() + "</white>");
+        send(sender, "<gray>Plugin/API:</gray> <white>" + snap.pluginVersion() + " / " + snap.apiVersion() + "</white> <dark_gray>(compat " + modules.compatibilityVersions().stream().map(CoreVersion::apiVersion).toList() + ")</dark_gray>");
         send(sender, "<gray>Paper:</gray> <white>" + escape(snap.paperVersion()) + "</white>");
         send(sender, "<gray>Java:</gray> <white>" + escape(snap.javaVersion()) + "</white>");
-        send(sender, "<gray>Executor:</gray> <white>" + snap.activeWorkers() + "/" + snap.workerThreads() + " active, queue " + snap.executorQueue() + "</white>");
+        send(sender, "<gray>Compute:</gray> <white>" + scheduler.activeWorkers() + "/" + scheduler.workerCount() + " active, queue " + scheduler.computeQueueSize() + ", rejected " + scheduler.rejectedComputeTasks() + "</white>");
+        send(sender, "<gray>IO:</gray> <white>" + scheduler.activeIoWorkers() + "/" + scheduler.ioWorkerCount() + " active, queue " + scheduler.ioQueueSize() + ", rejected " + scheduler.rejectedIoTasks() + "</white>");
+        if (events != null) {
+            var runtime = events.metrics();
+            send(sender, "<gray>Block events:</gray> <white>" + runtime.blockBreakReceived() + " received / " + runtime.blockBreakRouted() + " routed, " + events.compiledBlockRoutes() + " material routes</white>");
+            send(sender, "<gray>Context work:</gray> <white>" + runtime.contextsCreated() + " contexts, " + runtime.itemIdentityInspections() + " item inspections, " + runtime.pdcReads() + " PDC reads, " + runtime.originLookups() + " origin lookups</white>");
+        }
+        if (origins != null) {
+            var origin = origins.stats();
+            send(sender, "<gray>Origin:</gray> <white>" + origin.knownChunks() + " known / " + origin.unknownChunks() + " unknown chunks, " + origin.trackedPlacedBlocks() + " placed positions, " + origin.pendingWrites() + " pending writes</white>");
+            if (origin.persistenceError() != null) send(sender, "<yellow>Origin persistence:</yellow> <gray>" + escape(origin.persistenceError()) + "</gray>");
+        }
         send(sender, "<gray>GUI sessions:</gray> <white>" + snap.activeGuiSessions() + "</white>");
         send(sender, "<gray>Config reloads:</gray> <white>" + snap.successfulReloads() + " ok, " + snap.failedReloads() + " failed</white>");
         if (!snap.startupWarnings().isEmpty()) snap.startupWarnings().forEach(w -> send(sender, "<yellow>Warning:</yellow> <gray>" + escape(w) + "</gray>"));
     }
 
-    private void sendVersion(CommandSender sender) {
-        send(sender, "<gray>PlexonCore:</gray> <white>" + version.pluginVersion() + "</white> <dark_gray>|</dark_gray> <gray>API:</gray> <white>" + version.apiVersion() + "</white>");
+    private void sendPerf(CommandSender sender) {
+        if (events == null) { send(sender, "<gray>Core event runtime is not available.</gray>"); return; }
+        var runtime = events.metrics();
+        send(sender, "<gray>Gateway P50/P95/P99:</gray> <white>" + micros(runtime.gateway().p50Nanos()) + " / " + micros(runtime.gateway().p95Nanos()) + " / " + micros(runtime.gateway().p99Nanos()) + " µs</white>");
+        send(sender, "<gray>Context P50/P95/P99:</gray> <white>" + micros(runtime.contextBuild().p50Nanos()) + " / " + micros(runtime.contextBuild().p95Nanos()) + " / " + micros(runtime.contextBuild().p99Nanos()) + " µs</white>");
+        send(sender, "<gray>Dispatch P50/P95/P99:</gray> <white>" + micros(runtime.dispatch().p50Nanos()) + " / " + micros(runtime.dispatch().p95Nanos()) + " / " + micros(runtime.dispatch().p99Nanos()) + " µs</white>");
+        send(sender, "<gray>Subscriber failures:</gray> <white>" + runtime.moduleFailures() + "</white>");
     }
 
+    private void sendVersion(CommandSender sender) { send(sender, "<gray>PlexonCore:</gray> <white>" + version.pluginVersion() + "</white> <dark_gray>|</dark_gray> <gray>API:</gray> <white>" + version.apiVersion() + "</white>"); }
+
     private void reload(CommandSender sender) {
-        scheduler.supplyAsync(configs::reloadCore).whenComplete((result, error) -> scheduler.runPrimary(() -> {
+        scheduler.supplyIo(configs::reloadCore).whenComplete((result, error) -> scheduler.runPrimary(() -> {
             if (error != null) { send(sender, "<red>Reload failed:</red> <gray>" + escape(error.getMessage()) + "</gray>"); return; }
             if (!result.valid()) { send(sender, "<red>Reload rejected:</red> <white>" + escape(result.path()) + "</white> <gray>" + escape(result.reason()) + "</gray>"); return; }
-            modules.discoverLegacy(Bukkit.getPluginManager());
-            integrations.refresh();
-            send(sender, "<green>PlexonCore configuration reloaded atomically.</green>");
+            modules.discoverLegacy(Bukkit.getPluginManager()); integrations.refresh(); send(sender, "<green>PlexonCore configuration reloaded atomically.</green>");
         }));
     }
 
-    private boolean withPermission(CommandSender sender, String permission, Runnable action) {
-        if (!sender.hasPermission(permission)) { send(sender, "<red>You do not have permission for that Core diagnostic.</red>"); return true; }
-        action.run();
-        return true;
-    }
-
+    private boolean withPermission(CommandSender sender, String permission, Runnable action) { if (!sender.hasPermission(permission)) { send(sender, "<red>You do not have permission for that Core diagnostic.</red>"); return true; } action.run(); return true; }
     private void send(CommandSender sender, String message) { sender.sendMessage(text.render(TextService.TextMode.MINIMESSAGE, PREFIX + message)); }
 
-    @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length != 1) return List.of();
-        String prefix = args[0].toLowerCase(Locale.ROOT);
-        return List.of("status", "modules", "integrations", "diagnostics", "version", "reload").stream().filter(s -> s.startsWith(prefix)).toList();
-    }
+    @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) { if (args.length != 1) return List.of(); String prefix = args[0].toLowerCase(Locale.ROOT); return List.of("status", "modules", "integrations", "diagnostics", "perf", "version", "reload").stream().filter(s -> s.startsWith(prefix)).toList(); }
 
-    private static Material materialFor(String id) {
-        String value = id.toLowerCase(Locale.ROOT);
-        if (value.contains("quest")) return Material.BOOK;
-        if (value.contains("rank")) return Material.NAME_TAG;
-        if (value.contains("key")) return Material.TRIPWIRE_HOOK;
-        if (value.contains("crate")) return Material.CHEST;
-        if (value.contains("tool")) return Material.DIAMOND_PICKAXE;
-        if (value.contains("blacksmith")) return Material.ANVIL;
-        if (value.contains("shop")) return Material.EMERALD;
-        if (value.contains("spawner")) return Material.SPAWNER;
-        if (value.contains("chat")) return Material.PAPER;
-        if (value.contains("backpack")) return Material.ENDER_CHEST;
-        if (value.contains("panel")) return Material.COMPARATOR;
-        return Material.ENDER_EYE;
-    }
-
+    private static long micros(long nanos) { return nanos / 1_000L; }
+    private static Material materialFor(String id) { String value = id.toLowerCase(Locale.ROOT); if (value.contains("quest")) return Material.BOOK; if (value.contains("rank")) return Material.NAME_TAG; if (value.contains("key")) return Material.TRIPWIRE_HOOK; if (value.contains("crate")) return Material.CHEST; if (value.contains("tool")) return Material.DIAMOND_PICKAXE; if (value.contains("blacksmith")) return Material.ANVIL; if (value.contains("shop")) return Material.EMERALD; if (value.contains("spawner")) return Material.SPAWNER; if (value.contains("chat")) return Material.PAPER; if (value.contains("backpack")) return Material.ENDER_CHEST; if (value.contains("panel")) return Material.COMPARATOR; return Material.ENDER_EYE; }
     private static String stateColor(ModuleState state) { return switch (state) { case READY -> "<green>"; case DEGRADED, STARTING, DISCOVERED -> "<yellow>"; default -> "<red>"; }; }
     private static String integrationColor(IntegrationState state) { return state == IntegrationState.READY ? "<green>" : state == IntegrationState.MISSING ? "<gray>" : "<yellow>"; }
     private static String healthColor(HealthState state) { return state == HealthState.HEALTHY ? "<green>" : state == HealthState.DEGRADED ? "<yellow>" : "<red>"; }
     private static String escape(String value) { return value == null ? "" : value.replace("<", "\\<").replace(">", "\\>"); }
 
     public enum HealthState { HEALTHY, DEGRADED, FAILED, UNKNOWN }
-
-    public record DiagnosticsSnapshot(
-        String pluginVersion, String apiVersion, String paperVersion, String javaVersion, HealthState health,
-        int registeredModules, int legacyModules, int integrationCount, int activeGuiSessions,
-        int workerThreads, int activeWorkers, int executorQueue, boolean configValid,
-        long successfulReloads, long failedReloads, List<String> startupWarnings, Instant capturedAt
-    ) {}
+    public record DiagnosticsSnapshot(String pluginVersion, String apiVersion, String paperVersion, String javaVersion, HealthState health,
+                                      int registeredModules, int legacyModules, int integrationCount, int activeGuiSessions,
+                                      int workerThreads, int activeWorkers, int executorQueue, boolean configValid,
+                                      long successfulReloads, long failedReloads, List<String> startupWarnings, Instant capturedAt) {}
 }
