@@ -21,12 +21,12 @@ jobs:
       - name: Verify release build
         run: mvn -B -ntp clean verify
       - name: Generate checksum
-        run: sha256sum target/PlexonCore-1.0.0.jar > SHA256SUMS.txt
+        run: sha256sum target/PlexonCore-2.0.0.jar > SHA256SUMS.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PlexonCore 1.0.0
-          body_path: .release/1.0.0.md
+          name: PlexonCore 2.0.0
+          body_path: .release/2.0.0.md
           files: |
-            target/PlexonCore-1.0.0.jar
+            target/PlexonCore-2.0.0.jar
             SHA256SUMS.txt
