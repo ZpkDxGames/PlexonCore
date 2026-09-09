@@ -178,6 +178,8 @@ public final class BlockOriginService implements Listener {
                 try (ResultSet rs = ps.executeQuery()) {
                     return rs.next();
                 }
+            } catch (Exception error) {
+                throw new IllegalStateException("Could not read block-origin import marker", error);
             }
         });
     }
