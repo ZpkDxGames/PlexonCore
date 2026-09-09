@@ -1,18 +1,43 @@
-# Migrating Plexon modules to PlexonCore
+# Migrating Plexon modules to PlexonCore 2
 
-Migrate one plugin at a time. Do not rewrite gameplay logic merely to adopt Core.
+Migrate one repository at a time. Do not rewrite gameplay logic merely to adopt Core, and do not remove a module-local fallback until Core parity has been verified in production-like tests.
 
-1. Add `softdepend: [PlexonCore]` while standalone operation remains supported.
-2. Resolve `PlexonCoreAPI` through Bukkit `ServicesManager`.
-3. Register a module descriptor and supported Core API range.
-4. Replace duplicated integration detection with the Core integration registry.
-5. Adopt the shared SAFE/LEGACY/MINIMESSAGE text policy.
-6. Publish module health through the registry.
-7. Adopt the configuration framework only where it reduces duplicated validation/migration logic.
-8. Adopt GUI helpers where protected sessions/pagination are useful.
-9. Adopt item snapshots/matching where exact custom-item preservation matters.
-10. Adopt SQLite helpers where the module already owns persistent SQL data.
-11. Keep domain state, commands and gameplay logic in the module.
-12. Stage-test before switching from `softdepend` to `depend`.
+## Required sequence
 
-Recommended first pilot after Core 1.0.0 is stable: PlexonQuests. That migration is intentionally outside the PlexonCore 1.0.0 release.
+1. Inspect the module's latest stable and active development branches.
+2. Map every listener and classify it as high-frequency, medium-frequency, lifecycle or GUI/admin.
+3. Resolve `PlexonCoreAPI` through Bukkit `ServicesManager`.
+4. Register the module with an API 2 range such as `>=2.0 <3.0`.
+5. Keep the existing API 1/standalone path available during the migration window where required.
+6. For high-frequency block listeners, replace repeated player/world/material/origin/PDC resolution with a `CoreBlockBreakContext` subscription.
+7. Subscribe only to materials the module actually consumes.
+8. Request natural origin only when the module needs it.
+9. Request only the PDC namespace(s) the module owns.
+10. Keep cancellation/protection/current-drop decisions synchronous.
+11. Send only immutable values to compute/IO workers.
+12. Coalesce repetitive progression/persistence work instead of scheduling one task per event.
+13. Publish module health through `ModuleRegistry`.
+14. Compare the Core path and legacy path in equivalent runtime scenarios.
+15. Profile with Spark before removing redundant module-local infrastructure.
+
+## Origin migration rule
+
+`BlockOrigin.UNKNOWN` must not be treated as natural for anti-exploit progression. During migration, keep the module's previous natural-block tracker available until the Core origin service has demonstrated parity across restart, chunk load/unload, placement, piston movement and destructive events.
+
+## First pilot
+
+The first Core 2 gameplay migration is **PlexonTools**. Its ordinary single-block mining listener should become the proof that shared context construction reduces repeated hot-path work without changing Legendary Tool progression or ability semantics.
+
+PlexonTools continues to own tool definitions, progression, abilities, item visual updates and tool events. Core only supplies shared facts/runtime infrastructure.
+
+## Acceptance before deleting the legacy path
+
+- clean build and tests;
+- plugin enable/disable/restart verified;
+- no duplicate progression;
+- no lost progression;
+- no natural-block exploit;
+- no unsafe async Bukkit access;
+- bounded queues remain bounded under load;
+- Spark comparison shows no material regression;
+- rollback package remains available.

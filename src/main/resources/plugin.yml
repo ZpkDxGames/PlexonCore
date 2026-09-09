@@ -13,7 +13,7 @@ softdepend:
 commands:
   plexon:
     description: PlexonCore ecosystem diagnostics.
-    usage: /plexon [status|modules|integrations|diagnostics|version|reload]
+    usage: /plexon [status|modules|integrations|diagnostics|perf|version|reload]
     aliases: [plexoncore, pcore]
     permission: plexoncore.use
 permissions:
