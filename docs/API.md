@@ -14,10 +14,10 @@ Use `core.supportsApi(2, 0)` or `core.supportsApi(1, 0)` when a module needs an 
 
 ## Register a module
 
-Migrated modules should declare an API 2 range:
+Migrated modules should declare an API 2 range and register as `STARTING` until their own initialization has completed:
 
 ```java
-core.modules().register(new ModuleRegistry.ModuleDescriptor(
+var result = core.modules().register(new ModuleRegistry.ModuleDescriptor(
     "tools",
     "PlexonTools",
     plugin.getName(),
@@ -25,11 +25,34 @@ core.modules().register(new ModuleRegistry.ModuleDescriptor(
     plugin,
     ModuleRegistry.ModuleVersionRange.parse(">=2.0 <3.0"),
     Set.of("legendary-tools", "block-break-consumer"),
-    ModuleRegistry.ModuleState.READY,
-    "Ready",
+    ModuleRegistry.ModuleState.STARTING,
+    "Initializing",
     Instant.now()
 ));
+
+if (!result.success()) {
+    // Inspect result.descriptor()/result.message() and fail or degrade safely.
+    return;
+}
+
+// Only after module initialization actually succeeds:
+core.modules().updateState(
+    "tools",
+    plugin,
+    ModuleRegistry.ModuleState.READY,
+    "Ready"
+);
 ```
+
+The owner-aware `updateState(id, plugin, state, detail)` overload is preferred, especially when initialization completes asynchronously. It only mutates the descriptor when the exact plugin instance still owns that module ID, preventing late callbacks from an old/hot-disabled instance from changing a replacement module.
+
+On disable, modules should close their own subscriptions/resources. Core 2.0.4 also removes descriptors owned by the disabling plugin instance automatically. Explicit cleanup remains available when a module wants deterministic teardown earlier than Bukkit disable:
+
+```java
+core.modules().unregisterOwnedBy(plugin);
+```
+
+Existing code using `updateState(id, state, detail)` or `unregister(id)` remains supported for compatibility.
 
 Existing modules that still declare `>=1.0 <2.0` remain accepted while the compatibility bridge is enabled. This bridge is transitional; new development should target API 2.
 
