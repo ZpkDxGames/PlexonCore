@@ -1,0 +1,3 @@
+version: 2.0.0
+artifact: target/PlexonCore-2.0.0.jar
+tag: v2.0.0
