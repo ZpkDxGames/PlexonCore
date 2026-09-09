@@ -22,14 +22,14 @@ jobs:
       - name: Structural checks
         run: |
           test -f src/main/resources/plugin.yml
-          test -f target/PlexonCore-2.0.0-SNAPSHOT.jar
-          jar tf target/PlexonCore-2.0.0-SNAPSHOT.jar | grep -q 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class'
-          jar tf target/PlexonCore-2.0.0-SNAPSHOT.jar | grep -q 'plugin.yml'
-          sha256sum target/PlexonCore-2.0.0-SNAPSHOT.jar > SHA256SUMS.txt
+          test -f target/PlexonCore-2.0.0.jar
+          jar tf target/PlexonCore-2.0.0.jar | grep -q 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class'
+          jar tf target/PlexonCore-2.0.0.jar | grep -q 'plugin.yml'
+          sha256sum target/PlexonCore-2.0.0.jar > SHA256SUMS.txt
           git diff --check
       - uses: actions/upload-artifact@v4
         with:
-          name: PlexonCore-2.0.0-SNAPSHOT
+          name: PlexonCore-2.0.0
           path: |
-            target/PlexonCore-2.0.0-SNAPSHOT.jar
+            target/PlexonCore-2.0.0.jar
             SHA256SUMS.txt
