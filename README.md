@@ -2,35 +2,38 @@
 
 PlexonCore is the shared runtime foundation for the PlexonCraft plugin ecosystem. It centralizes cross-cutting infrastructure while keeping gameplay plugins independently versioned, replaceable and testable.
 
-## 1.0.0 scope
+## 2.0.0 development scope
 
-- Core API and API-version compatibility (`1.0`)
-- Plexon module registration and legacy discovery
-- Atomic validated YAML configuration support
-- Safe, legacy and MiniMessage text policies
-- Controlled PlaceholderAPI rendering
-- Lightweight protected GUI/session helpers
-- Full Paper item snapshots and exact matching
-- SQLite/WAL helpers with bounded asynchronous writes
-- Integration registry
-- Lifecycle-aware scheduler helpers
-- Diagnostics, health snapshots and `/plexon`
+PlexonCore 2.0 introduces the Core-first high-frequency runtime described by the ecosystem modularization roadmap while preserving the services introduced in 1.0.
 
-PlexonCore does **not** own ranks, quests, crates, keys, shops, tools, chat, claims, backpacks, spawners, panel logic or blacksmith gameplay.
+Current 2.0 foundation:
+
+- Core API `2.0`
+- compatibility bridge for API `1.0` module ranges during migration
+- centralized block-break event gateway
+- immutable shared block-break contexts
+- precompiled material subscription routes
+- lazy item/PDC identity inspection only when a subscriber requests it
+- authoritative natural/player-placed/unknown block-origin service
+- chunk-local origin caches backed by SQLite/WAL
+- bounded compute and IO lanes with rejection metrics
+- atomic batch accumulator for coalesced progression work
+- runtime event, context, PDC, origin and failure counters
+- rolling P50/P95/P99 Core stage timings
+- `/plexon perf` and expanded diagnostics
+
+Existing 1.0 services remain available: configuration, text, GUI/session helpers, exact item snapshots, integration lookup, SQLite helpers, module discovery and lifecycle utilities.
+
+PlexonCore does **not** own ranks, quests, crates, keys, shops, tools, chat, backpacks, spawners or blacksmith gameplay. Gameplay semantics stay in independently versioned modules.
 
 ## Requirements
 
 - Paper 26.2
 - Java 25
 
-## Installation
+## Development status
 
-1. Download `PlexonCore-1.0.0.jar` from the GitHub Release.
-2. Place it in `plugins/`.
-3. Start the server.
-4. Run `/plexon diagnostics` as an operator to inspect Core, module and integration health.
-
-Existing Plexon plugins remain standalone until they explicitly adopt the Core API.
+`2.0.0-SNAPSHOT` is an implementation/runtime-test candidate, not a stable replacement for the released 1.0.0 build yet. The 2.0 branch must pass CI, server lifecycle tests and Spark acceptance profiles before stable promotion.
 
 ## API lookup
 
@@ -40,15 +43,16 @@ RegisteredServiceProvider<PlexonCoreAPI> provider =
 PlexonCoreAPI core = provider.getProvider();
 ```
 
-See [`docs/API.md`](docs/API.md) for module registration, text, item, GUI, SQLite and diagnostics examples.
+See [`docs/API.md`](docs/API.md) for API 2 event subscriptions, API 1 compatibility, scheduling, origin and diagnostics examples.
 
 ## Commands
 
-- `/plexon` — ecosystem GUI for players with permission
+- `/plexon` — ecosystem GUI
 - `/plexon status`
 - `/plexon modules`
 - `/plexon integrations`
 - `/plexon diagnostics`
+- `/plexon perf` — Core gateway/context/dispatch latency percentiles
 - `/plexon version`
 - `/plexon reload` — reloads PlexonCore only
 
@@ -58,8 +62,8 @@ See [`docs/API.md`](docs/API.md) for module registration, text, item, GUI, SQLit
 mvn -B -ntp clean verify
 ```
 
-The release artifact is `target/PlexonCore-1.0.0.jar`.
+Current candidate artifact: `target/PlexonCore-2.0.0-SNAPSHOT.jar`.
 
-## Compatibility and migration
+## Migration
 
-PlexonCore plugin version `1.0.0` exposes Core API `1.0`. Modules should declare supported Core API ranges rather than matching an exact plugin build. Migration is intentionally incremental; see [`docs/MIGRATING_MODULES.md`](docs/MIGRATING_MODULES.md).
+Migration is repository-by-repository. Do not migrate every gameplay plugin in the Core 2 implementation itself. The first production pilot after the Core 2 backbone is accepted is PlexonTools because ordinary mining is the highest-value shared hot path. See [`docs/MIGRATING_MODULES.md`](docs/MIGRATING_MODULES.md).
