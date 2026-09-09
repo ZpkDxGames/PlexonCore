@@ -2,11 +2,11 @@
 
 PlexonCore is the shared runtime foundation for the PlexonCraft plugin ecosystem. It centralizes cross-cutting infrastructure while keeping gameplay plugins independently versioned, replaceable and testable.
 
-## 2.0.0 development scope
+## 2.0.0 scope
 
 PlexonCore 2.0 introduces the Core-first high-frequency runtime described by the ecosystem modularization roadmap while preserving the services introduced in 1.0.
 
-Current 2.0 foundation:
+Core 2.0 foundation:
 
 - Core API `2.0`
 - compatibility bridge for API `1.0` module ranges during migration
@@ -31,9 +31,15 @@ PlexonCore does **not** own ranks, quests, crates, keys, shops, tools, chat, bac
 - Paper 26.2
 - Java 25
 
-## Development status
+## Installation
 
-`2.0.0-SNAPSHOT` is an implementation/runtime-test candidate, not a stable replacement for the released 1.0.0 build yet. The 2.0 branch must pass CI, server lifecycle tests and Spark acceptance profiles before stable promotion.
+1. Download `PlexonCore-2.0.0.jar` from GitHub Releases.
+2. Back up the existing `plugins/PlexonCore/` data directory when upgrading from 1.0.0.
+3. Replace the old PlexonCore JAR in `plugins/`.
+4. Start the server.
+5. Run `/plexon diagnostics` and `/plexon perf` to inspect runtime health.
+
+Existing Plexon gameplay plugins can remain installed while migration proceeds repository-by-repository through the API 1.0 compatibility bridge and legacy discovery.
 
 ## API lookup
 
@@ -62,8 +68,8 @@ See [`docs/API.md`](docs/API.md) for API 2 event subscriptions, API 1 compatibil
 mvn -B -ntp clean verify
 ```
 
-Current candidate artifact: `target/PlexonCore-2.0.0-SNAPSHOT.jar`.
+Stable artifact: `target/PlexonCore-2.0.0.jar`.
 
 ## Migration
 
-Migration is repository-by-repository. Do not migrate every gameplay plugin in the Core 2 implementation itself. The first production pilot after the Core 2 backbone is accepted is PlexonTools because ordinary mining is the highest-value shared hot path. See [`docs/MIGRATING_MODULES.md`](docs/MIGRATING_MODULES.md).
+Migration is repository-by-repository. Do not migrate every gameplay plugin in the Core 2 implementation itself. The first production pilot after the Core 2 backbone is PlexonTools because ordinary mining is the highest-value shared hot path. See [`docs/MIGRATING_MODULES.md`](docs/MIGRATING_MODULES.md).
