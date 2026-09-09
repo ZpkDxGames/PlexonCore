@@ -15,6 +15,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.plugin.Plugin;
 
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -30,6 +31,7 @@ public final class CoreEventGateway implements Listener {
     private final CoreRuntimeMetrics metrics = new CoreRuntimeMetrics();
     private final CoreItemIdentityResolver itemIdentityResolver = new CoreItemIdentityResolver(metrics);
     private final Map<String, Long> lastFailureLog = new ConcurrentHashMap<>();
+    private final Map<BlockBreakEvent, PendingBlockBreak> pendingBlockBreaks = new IdentityHashMap<>();
     private final AtomicLong eventSequence = new AtomicLong();
 
     public CoreEventGateway(Plugin plugin, BlockOriginService origins) {
@@ -45,8 +47,8 @@ public final class CoreEventGateway implements Listener {
     public CoreRuntimeMetrics.Snapshot metrics() { return metrics.snapshot(); }
     public int compiledBlockRoutes() { return subscriptions.routeCount(); }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockBreak(BlockBreakEvent event) {
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void captureBlockBreak(BlockBreakEvent event) {
         long gatewayStart = System.nanoTime();
         metrics.blockBreakReceived();
         Block block = event.getBlock();
@@ -73,24 +75,38 @@ public final class CoreEventGateway implements Listener {
             : itemIdentityResolver.resolve(player.getInventory().getItemInMainHand(), plan.itemIdentityNamespaces());
         CoreBlockBreakContext context = new CoreBlockBreakContext(
             eventSequence.incrementAndGet(), player.getUniqueId(), player.getName(), worldId, world.getName(), x, y, z,
-            material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime()
+            material, mainHand, origin, Bukkit.getCurrentTick(), System.nanoTime(), event.isDropItems()
         );
         metrics.contextCreated();
         metrics.contextNanos(System.nanoTime() - contextStart);
+        pendingBlockBreaks.put(event, new PendingBlockBreak(plan, context, gatewayStart));
+    }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void dispatchFinalBlockBreak(BlockBreakEvent event) {
+        PendingBlockBreak pending = pendingBlockBreaks.remove(event);
+        if (pending == null) return;
+        if (event.isCancelled()) {
+            metrics.gatewayNanos(System.nanoTime() - pending.gatewayStart());
+            return;
+        }
+
+        CoreBlockBreakContext finalContext = pending.context().withDropItems(event.isDropItems());
         long dispatchStart = System.nanoTime();
-        for (SubscriptionRegistry.Subscriber subscriber : plan.subscribers()) {
-            try { subscriber.handler().handle(context); }
+        for (SubscriptionRegistry.Subscriber subscriber : pending.plan().subscribers()) {
+            try { subscriber.handler().handle(finalContext); }
             catch (Throwable failure) { metrics.moduleFailure(); rateLimitedFailure(subscriber.moduleId(), failure); }
         }
         metrics.dispatchNanos(System.nanoTime() - dispatchStart);
-        metrics.gatewayNanos(System.nanoTime() - gatewayStart);
+        metrics.gatewayNanos(System.nanoTime() - pending.gatewayStart());
     }
 
     private void rateLimitedFailure(String moduleId, Throwable failure) {
         long now = System.nanoTime(); Long previous = lastFailureLog.put(moduleId, now);
         if (previous == null || now - previous >= FAILURE_LOG_INTERVAL_NANOS) plugin.getLogger().log(Level.SEVERE, "Core event subscriber failed: " + moduleId, failure);
     }
+
+    private record PendingBlockBreak(SubscriptionRegistry.RoutePlan plan, CoreBlockBreakContext context, long gatewayStart) {}
 
     @FunctionalInterface public interface BlockBreakHandler { void handle(CoreBlockBreakContext context); }
 }
