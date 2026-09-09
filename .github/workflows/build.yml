@@ -17,19 +17,28 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      - name: Resolve project version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "jar=target/PlexonCore-${VERSION}.jar" >> "$GITHUB_OUTPUT"
       - name: Verify
         run: mvn -B -ntp clean verify
       - name: Structural checks
+        shell: bash
         run: |
+          JAR="${{ steps.version.outputs.jar }}"
           test -f src/main/resources/plugin.yml
-          test -f target/PlexonCore-2.0.0.jar
-          jar tf target/PlexonCore-2.0.0.jar | grep -q 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class'
-          jar tf target/PlexonCore-2.0.0.jar | grep -q 'plugin.yml'
-          sha256sum target/PlexonCore-2.0.0.jar > SHA256SUMS.txt
+          test -f "$JAR"
+          jar tf "$JAR" | grep -q 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class'
+          jar tf "$JAR" | grep -q 'plugin.yml'
+          sha256sum "$JAR" > SHA256SUMS.txt
           git diff --check
       - uses: actions/upload-artifact@v4
         with:
-          name: PlexonCore-2.0.0
+          name: PlexonCore-${{ steps.version.outputs.version }}
           path: |
-            target/PlexonCore-2.0.0.jar
+            ${{ steps.version.outputs.jar }}
             SHA256SUMS.txt
