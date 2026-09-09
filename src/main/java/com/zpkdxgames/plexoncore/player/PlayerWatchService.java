@@ -7,7 +7,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -129,7 +128,7 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
-        dispatchAndClear(event.getPlayer(), WatchType.QUIT, Signal.QUIT, ignored -> null);
+        dispatchAndClear(event.getPlayer(), WatchType.QUIT, Signal.QUIT);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -144,10 +143,10 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
-        dispatchAndClear(event.getEntity(), WatchType.DEATH, Signal.DIED, Player::getLocation);
+        dispatchAndClear(event.getEntity(), WatchType.DEATH, Signal.DIED);
     }
 
-    private void dispatchAndClear(Player player, WatchType type, Signal signal, Consumer<Player> ignored) {
+    private void dispatchAndClear(Player player, WatchType type, Signal signal) {
         var registrations = watches.get(player.getUniqueId());
         if (registrations == null || registrations.isEmpty()) return;
         if (contains(registrations, type)) {
