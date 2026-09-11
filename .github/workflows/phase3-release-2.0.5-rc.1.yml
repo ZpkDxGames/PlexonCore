@@ -1,0 +1,179 @@
+name: Phase 3 prerelease 2.0.5-rc.1
+
+on:
+  push:
+    branches:
+      - 'release-trigger/2.0.5-rc.1'
+
+permissions:
+  contents: write
+
+env:
+  ACCEPTED_SHA: 'b26dbbd1c583380752f582e440cb5099d019f87c'
+  VERSION: '2.0.5-rc.1'
+  TAG: 'v2.0.5-rc.1'
+  PREVIOUS_TAG: 'v2.0.4'
+  PREVIOUS_TAG_SHA: '83571edb428472649af87be9d52868fc8f325806'
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact release candidate
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify immutable release boundary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = 'release-trigger/2.0.5-rc.1'
+          git merge-base --is-ancestor "${ACCEPTED_SHA}" "${GITHUB_SHA}"
+          mapfile -t changed < <(git diff --name-only "${ACCEPTED_SHA}..${GITHUB_SHA}" | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = '.github/workflows/phase3-release-2.0.5-rc.1.yml'
+          test "${changed[1]}" = 'pom.xml'
+          python3 - <<'PY'
+          import os, subprocess
+          accepted = os.environ['ACCEPTED_SHA']
+          base = subprocess.check_output(['git','show',f'{accepted}:pom.xml'], text=True)
+          current = open('pom.xml', encoding='utf-8').read()
+          expected = base.replace('<version>2.0.4</version>', '<version>2.0.5-rc.1</version>', 1)
+          if current != expected:
+              raise SystemExit('pom.xml contains changes beyond the project-version release metadata')
+          PY
+          test "$(git ls-remote --tags origin "refs/tags/${PREVIOUS_TAG}" | cut -f1)" = "${PREVIOUS_TAG_SHA}"
+          test -z "$(git ls-remote --tags origin "refs/tags/${TAG}" || true)"
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; refusing to replace immutable evidence." >&2
+            exit 1
+          fi
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Full supported verification
+        run: mvn -B -ntp clean verify
+
+      - name: Verify distribution, Java 25, Paper isolation, and embedded version
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar_path="target/PlexonCore-${VERSION}.jar"
+          test -s "${jar_path}"
+          jar tf "${jar_path}" > target/jar-contents.txt
+          grep -qx 'plugin.yml' target/jar-contents.txt
+          grep -qx 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class' target/jar-contents.txt
+          grep -q '^org/sqlite/JDBC.class$' target/jar-contents.txt
+          for prefix in 'org/bukkit/' 'io/papermc/' 'net/kyori/adventure/'; do
+            if grep -q "^${prefix}" target/jar-contents.txt; then
+              echo "Server API must not be shaded into PlexonCore: ${prefix}" >&2
+              exit 1
+            fi
+          done
+          unzip -p "${jar_path}" plugin.yml | sed -n 's/^version:[[:space:]]*//p' | head -n 1 | tr -d " '\"\r" | grep -qx "${VERSION}"
+          javap -verbose -classpath "${jar_path}" com.zpkdxgames.plexoncore.PlexonCorePlugin | grep -q 'major version: 69'
+          grep -q '<paper.version>26.2.build.121-stable</paper.version>' pom.xml
+          mvn -B -ntp dependency:tree -DoutputFile=target/dependency-tree.txt
+          sha256sum "${jar_path}" > target/SHA256SUMS.txt
+          sha256sum --check target/SHA256SUMS.txt
+
+      - name: Generate provenance and test summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, xml.etree.ElementTree as ET
+          totals = dict(tests=0, failures=0, errors=0, skipped=0)
+          for path in glob.glob('target/surefire-reports/TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(root.attrib.get(key, 0))
+          if totals['failures'] or totals['errors'] or totals['skipped']:
+              raise SystemExit(f'Unexpected test accounting: {totals}')
+          with open('target/TEST_SUMMARY.txt','w',encoding='utf-8') as out:
+              out.write('PlexonCore 2.0.5-rc.1 Phase 3 release verification\n')
+              for key in ('tests','failures','errors','skipped'):
+                  out.write(f'{key}={totals[key]}\n')
+              out.write('java_major=69\n')
+              out.write('paper_26_2=PASS\n')
+              out.write('server_api_non_shaded=PASS\n')
+              out.write('dependency_metadata_delta=VERSION_ONLY\n')
+              out.write('runtime_certification=NOT_EXECUTED\n')
+          with open('target/PROVENANCE.txt','w',encoding='utf-8') as out:
+              out.write('product=PlexonCore\n')
+              out.write('version=2.0.5-rc.1\n')
+              out.write(f"accepted_phase3_sha={os.environ['ACCEPTED_SHA']}\n")
+              out.write(f"release_candidate_sha={os.environ['GITHUB_SHA']}\n")
+              out.write(f"ref={os.environ['GITHUB_REF']}\n")
+              out.write('accepted_sha_is_ancestor=PASS\n')
+              out.write('release_delta=METADATA_AND_RELEASE_INFRA_ONLY\n')
+              out.write('runtime_certification=NOT_EXECUTED\n')
+          print(totals)
+          PY
+          cat target/TEST_SUMMARY.txt
+          cat target/PROVENANCE.txt
+
+      - name: Publish immutable GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          cat > "${notes}" <<'NOTES'
+          ## PlexonCore 2.0.5-rc.1 — Phase 3 performance candidate
+
+          Prerelease only. This artifact is built from the accepted/frozen Phase 3 performance source boundary plus release metadata/infrastructure only.
+
+          Runtime certification was not executed by this pipeline. Stable promotion is not authorized.
+          NOTES
+          gh release create "${TAG}" \
+            "target/PlexonCore-${VERSION}.jar" \
+            target/SHA256SUMS.txt \
+            target/TEST_SUMMARY.txt \
+            target/PROVENANCE.txt \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "PlexonCore ${VERSION} — Phase 3 RC" \
+            --notes-file "${notes}" \
+            --prerelease
+
+      - name: Independently verify published prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json=target/published-release.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "${release_json}"
+          python3 - <<'PY'
+          import json, os
+          data=json.load(open('target/published-release.json',encoding='utf-8'))
+          assert data['prerelease'] is True
+          jar=f"PlexonCore-{os.environ['VERSION']}.jar"
+          assets={a['name']:a for a in data['assets']}
+          assert jar in assets and assets[jar]['size'] > 0
+          assert 'SHA256SUMS.txt' in assets
+          print(f"release_id={data['id']}")
+          print(f"release_url={data['html_url']}")
+          print(f"jar_size={assets[jar]['size']}")
+          print(f"jar_remote_digest={assets[jar].get('digest','')}")
+          print(f"jar_download_url={assets[jar]['browser_download_url']}")
+          PY
+          test "$(git ls-remote --tags origin "refs/tags/${TAG}" | cut -f1)" = "${GITHUB_SHA}"
+          test "$(git ls-remote --tags origin "refs/tags/${PREVIOUS_TAG}" | cut -f1)" = "${PREVIOUS_TAG_SHA}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/PlexonCore-${VERSION}.jar"
+          curl --fail --location --retry 3 --output target/remote.jar "${url}"
+          local_sha=$(cut -d' ' -f1 target/SHA256SUMS.txt)
+          remote_sha=$(sha256sum target/remote.jar | cut -d' ' -f1)
+          test "${local_sha}" = "${remote_sha}"
+          echo "verified_sha256=${remote_sha}"
