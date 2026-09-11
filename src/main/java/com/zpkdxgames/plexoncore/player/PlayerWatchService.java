@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -25,6 +26,9 @@ import org.bukkit.event.player.PlayerQuitEvent;
  * have pending work (for example a teleport warmup). Event callbacks are invoked synchronously in
  * the same main-thread event context as the underlying Bukkit event. The hot path performs one UUID
  * map lookup and returns immediately when a player has no watches.</p>
+ *
+ * <p>Subscriber failures are isolated. One module throwing from a watch callback cannot prevent
+ * other watches from receiving the same signal or prevent terminal watch cleanup.</p>
  */
 public final class PlayerWatchService implements Listener, AutoCloseable {
     public enum WatchType {
@@ -77,6 +81,15 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<Long, Registration>> watches = new ConcurrentHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final BiConsumer<Long, Throwable> failureHandler;
+
+    public PlayerWatchService() {
+        this((watchId, failure) -> {});
+    }
+
+    public PlayerWatchService(BiConsumer<Long, Throwable> failureHandler) {
+        this.failureHandler = Objects.requireNonNull(failureHandler, "failureHandler");
+    }
 
     public WatchHandle watch(UUID playerId, Set<WatchType> types, WatchListener listener) {
         Objects.requireNonNull(playerId, "playerId");
@@ -149,11 +162,14 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
     private void dispatchAndClear(Player player, WatchType type, Signal signal) {
         var registrations = watches.get(player.getUniqueId());
         if (registrations == null || registrations.isEmpty()) return;
-        if (contains(registrations, type)) {
-            dispatch(registrations, type, new PlayerActivity(
-                    player.getUniqueId(), signal, Position.from(player.getLocation()), null, 0.0D, System.nanoTime()));
+        try {
+            if (contains(registrations, type)) {
+                dispatch(registrations, type, new PlayerActivity(
+                        player.getUniqueId(), signal, Position.from(player.getLocation()), null, 0.0D, System.nanoTime()));
+            }
+        } finally {
+            watches.remove(player.getUniqueId(), registrations);
         }
-        watches.remove(player.getUniqueId(), registrations);
     }
 
     private static boolean contains(ConcurrentHashMap<Long, Registration> registrations, WatchType type) {
@@ -163,13 +179,37 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
         return false;
     }
 
-    private static void dispatch(
+    private int dispatch(
             ConcurrentHashMap<Long, Registration> registrations,
             WatchType type,
             PlayerActivity activity) {
+        int delivered = 0;
         for (Registration registration : registrations.values()) {
             if (!registration.types().contains(type)) continue;
-            registration.listener().onActivity(activity);
+            try {
+                registration.listener().onActivity(activity);
+                delivered++;
+            } catch (Throwable failure) {
+                reportFailure(registration.id(), failure);
+            }
+        }
+        return delivered;
+    }
+
+    int dispatchWatchedActivity(UUID playerId, WatchType type, PlayerActivity activity) {
+        Objects.requireNonNull(playerId, "playerId");
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(activity, "activity");
+        var registrations = watches.get(playerId);
+        if (registrations == null || registrations.isEmpty()) return 0;
+        return dispatch(registrations, type, activity);
+    }
+
+    private void reportFailure(long watchId, Throwable failure) {
+        try {
+            failureHandler.accept(watchId, failure);
+        } catch (Throwable ignored) {
+            // Failure reporting must never break the shared event gateway.
         }
     }
 

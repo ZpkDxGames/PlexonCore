@@ -78,15 +78,21 @@ public final class CoreScheduler implements AutoCloseable {
     }
 
     public TaskHandle schedulePrimary(Duration delay, Runnable task) {
-        long ticks = Math.max(1, delay.toMillis() / 50L);
-        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskLater(plugin, task, ticks);
+        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskLater(plugin, task, delayTicks(delay));
         return new TaskHandle(bukkitTask::cancel, bukkitTask::isCancelled);
     }
 
     public TaskHandle scheduleAsync(Duration delay, Runnable task) {
-        long ticks = Math.max(1, delay.toMillis() / 50L);
-        BukkitTask trigger = Bukkit.getScheduler().runTaskLater(plugin, () -> runAsync(task), ticks);
+        BukkitTask trigger = Bukkit.getScheduler().runTaskLater(plugin, () -> runAsync(task), delayTicks(delay));
         return new TaskHandle(trigger::cancel, trigger::isCancelled);
+    }
+
+    static long delayTicks(Duration delay) {
+        long millis = Objects.requireNonNull(delay, "delay").toMillis();
+        if (millis <= 0L) return 1L;
+        long ticks = millis / 50L;
+        if (millis % 50L != 0L) ticks++;
+        return Math.max(1L, ticks);
     }
 
     public int queueSize() { return computeExecutor.getQueue().size(); }

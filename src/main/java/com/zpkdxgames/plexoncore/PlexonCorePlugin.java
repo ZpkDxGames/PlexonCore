@@ -25,6 +25,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.logging.Level;
 
 public final class PlexonCorePlugin extends JavaPlugin implements Listener {
     private CoreVersion coreVersion;
@@ -64,7 +65,8 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         blockOriginService = new BlockOriginService(this, scheduler);
         blockOriginService.start(sqliteService, getDataFolder().toPath().resolve("core-origin.db"));
         eventGateway = new CoreEventGateway(this, blockOriginService);
-        playerWatchService = new PlayerWatchService();
+        playerWatchService = new PlayerWatchService((watchId, failure) ->
+                getLogger().log(Level.SEVERE, "Core player-watch subscriber failed (watch " + watchId + ")", failure));
         diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService, scheduler, guiService, textService, eventGateway, blockOriginService);
 
         moduleRegistry.discoverLegacy(getServer().getPluginManager());
