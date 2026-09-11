@@ -35,7 +35,7 @@ public final class IntegrationRegistry {
         registerKnown("PLEXON_CHATS", "PlexonChats");
         registerKnown("PLEXON_PANEL", "PlexonPanel");
         registerKnown("PLEXON_BACKPACKS", "PlexonBackpacks");
-        registerKnown("PLEXON_CLAIM_FLAGS", "PlexonClaimFlags");
+        registerKnown("PLEXON_GP_FLAGS", "PlexonGPFlags");
     }
 
     public void registerKnown(String id, String pluginName) {
@@ -69,7 +69,7 @@ public final class IntegrationRegistry {
     }
 
     private static String normalize(String id) {
-        return id.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        return Objects.requireNonNull(id, "id").trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
     }
 
     public enum IntegrationState { READY, DEGRADED, INCOMPATIBLE, MISSING, FAILED }

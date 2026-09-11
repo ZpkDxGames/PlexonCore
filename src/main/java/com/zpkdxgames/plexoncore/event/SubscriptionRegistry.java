@@ -12,10 +12,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 final class SubscriptionRegistry {
     private final Map<Material, List<Subscriber>> mutableRoutes = new EnumMap<>(Material.class);
-    private final RoutePlan[] compiledRoutes = new RoutePlan[Material.values().length];
+    private final AtomicReferenceArray<RoutePlan> compiledRoutes = new AtomicReferenceArray<>(Material.values().length);
     private volatile int routeCount;
 
     synchronized SubscriptionHandle subscribe(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
@@ -31,7 +32,7 @@ final class SubscriptionRegistry {
     }
 
     RoutePlan plan(Material material) {
-        RoutePlan plan = compiledRoutes[material.ordinal()];
+        RoutePlan plan = compiledRoutes.get(material.ordinal());
         return plan == null ? RoutePlan.EMPTY : plan;
     }
 
@@ -45,8 +46,8 @@ final class SubscriptionRegistry {
             next.remove(subscriber);
             if (next.isEmpty()) {
                 mutableRoutes.remove(material);
-                if (compiledRoutes[material.ordinal()] != null) routeCount--;
-                compiledRoutes[material.ordinal()] = null;
+                if (compiledRoutes.get(material.ordinal()) != null) routeCount--;
+                compiledRoutes.set(material.ordinal(), null);
             } else {
                 mutableRoutes.put(material, next);
                 compile(material, next);
@@ -61,8 +62,8 @@ final class SubscriptionRegistry {
             origin |= subscriber.subscription().requiresNaturalOrigin();
             namespaces.addAll(subscriber.subscription().itemIdentityNamespaces());
         }
-        if (compiledRoutes[material.ordinal()] == null) routeCount++;
-        compiledRoutes[material.ordinal()] = new RoutePlan(List.copyOf(subscribers), origin, Set.copyOf(namespaces));
+        if (compiledRoutes.get(material.ordinal()) == null) routeCount++;
+        compiledRoutes.set(material.ordinal(), new RoutePlan(List.copyOf(subscribers), origin, Set.copyOf(namespaces)));
     }
 
     private static String normalizeModuleId(String value) {

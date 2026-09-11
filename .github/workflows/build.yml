@@ -23,17 +23,29 @@ jobs:
         run: echo "version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> "$GITHUB_OUTPUT"
       - name: Verify
         run: mvn -B -ntp clean verify
-      - name: Structural checks
+      - name: Verify distribution contract
         shell: bash
         run: |
           set -euo pipefail
-          jar_path="target/PlexonCore-${{ steps.project.outputs.version }}.jar"
-          test -f src/main/resources/plugin.yml
-          test -f "${jar_path}"
-          jar tf "${jar_path}" | grep -q 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class'
-          jar tf "${jar_path}" | grep -q 'com/zpkdxgames/plexoncore/origin/BlockOriginService.class'
-          jar tf "${jar_path}" | grep -q 'plugin.yml'
+          version="${{ steps.project.outputs.version }}"
+          jar_path="target/PlexonCore-${version}.jar"
+          test -s "${jar_path}"
+          jar tf "${jar_path}" > target/jar-contents.txt
+          grep -qx 'plugin.yml' target/jar-contents.txt
+          grep -qx 'com/zpkdxgames/plexoncore/PlexonCorePlugin.class' target/jar-contents.txt
+          grep -qx 'com/zpkdxgames/plexoncore/origin/BlockOriginService.class' target/jar-contents.txt
+          grep -qx 'org/sqlite/JDBC.class' target/jar-contents.txt
+          for prefix in 'org/bukkit/' 'io/papermc/' 'net/kyori/adventure/'; do
+            if grep -q "^${prefix}" target/jar-contents.txt; then
+              echo "Server API must not be shaded into PlexonCore: ${prefix}" >&2
+              exit 1
+            fi
+          done
+          unzip -p "${jar_path}" plugin.yml | sed -n 's/^version:[[:space:]]*//p' | head -n 1 | tr -d " '\"\r" | grep -qx "${version}"
+          javap -verbose -classpath "${jar_path}" com.zpkdxgames.plexoncore.PlexonCorePlugin | grep -q 'major version: 69'
+          grep -q '<paper.version>26.2.build.121-stable</paper.version>' pom.xml
           sha256sum "${jar_path}" > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
           git diff --check
       - uses: actions/upload-artifact@v4
         with:
