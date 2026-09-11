@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.logging.Level;
 
 public final class CoreEventGateway implements Listener {
@@ -93,12 +94,39 @@ public final class CoreEventGateway implements Listener {
 
         CoreBlockBreakContext finalContext = pending.context().withDropItems(event.isDropItems());
         long dispatchStart = System.nanoTime();
-        for (SubscriptionRegistry.Subscriber subscriber : pending.plan().subscribers()) {
-            try { subscriber.handler().handle(finalContext); }
-            catch (Throwable failure) { metrics.moduleFailure(); rateLimitedFailure(subscriber.moduleId(), failure); }
-        }
+        dispatchCommitted(pending.plan(), finalContext, false, (moduleId, failure) -> {
+            metrics.moduleFailure();
+            rateLimitedFailure(moduleId, failure);
+        });
         metrics.dispatchNanos(System.nanoTime() - dispatchStart);
         metrics.gatewayNanos(System.nanoTime() - pending.gatewayStart());
+    }
+
+    /**
+     * Package-private pure dispatch seam used by contract tests. A committed context is delivered
+     * at most once to each subscriber in the already-compiled route plan. Cancellation short-circuits
+     * all subscribers; a failure in one module is reported and cannot fan out a duplicate delivery.
+     */
+    static int dispatchCommitted(
+            SubscriptionRegistry.RoutePlan plan,
+            CoreBlockBreakContext context,
+            boolean cancelled,
+            BiConsumer<String, Throwable> failureHandler) {
+        Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(failureHandler, "failureHandler");
+        if (cancelled) return 0;
+
+        int delivered = 0;
+        for (SubscriptionRegistry.Subscriber subscriber : plan.subscribers()) {
+            try {
+                subscriber.handler().handle(context);
+                delivered++;
+            } catch (Throwable failure) {
+                failureHandler.accept(subscriber.moduleId(), failure);
+            }
+        }
+        return delivered;
     }
 
     private void rateLimitedFailure(String moduleId, Throwable failure) {
