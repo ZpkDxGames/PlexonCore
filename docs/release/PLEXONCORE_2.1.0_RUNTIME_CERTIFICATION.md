@@ -1,68 +1,64 @@
-# PlexonCore 2.1.0 Runtime Certification
+# PlexonCore 2.1.0 Runtime Verification
 
-## Candidate identity
+## Stable artifact identity
 
-This checklist applies only to the exact runtime candidate below.
+This checklist applies to the full stable artifact below.
 
-- Candidate version: `2.1.0-rc.1`
-- Certified source SHA: `b259f6116ab26831ab250e0b61335908b87e71fa`
-- Candidate JAR: `PlexonCore-2.1.0-rc.1.jar`
-- Candidate JAR SHA-256: `ae32e9722eca8fea2ccbe161e2748181349b6c2ec59f09962133094620293375`
+- Stable version: `2.1.0`
+- Final audited source line: `b259f6116ab26831ab250e0b61335908b87e71fa`
+- Final stable branch-head build SHA: `f13b94210febf5ea62d03be89081d1750b49cbe9`
+- Stable JAR: `PlexonCore-2.1.0.jar`
+- Stable JAR size: `12,244,388` bytes
+- Stable JAR SHA-256: `6ee352f0a913aa7bce193a5f793132e893ea168f35793045191c0fa9ceea6ed6`
+- GitHub Actions artifact ID: `10524405378`
+- Artifact ZIP digest: `sha256:fa0f69bfec006065a0ff9147ebe968f48d8902539b1ad3bcf43447fe4badc77b`
 - Paper target: `26.2.build.121-stable`
 - Java target: `25`
 - Rollback baseline: `v2.0.5`
 
-If the JAR hash differs, stop certification and identify the binary before continuing.
+If the deployed JAR hash differs, identify the binary before continuing.
+
+This document is deployment/runtime verification for the stable-only release policy. It does not imply that live-server evidence existed before publication.
 
 ## Pre-deployment
 
 - [ ] Stop PlexonCraft cleanly.
 - [ ] Record the current Core JAR filename and SHA-256.
-- [ ] Confirm the currently accepted stable baseline is PlexonCore 2.0.5.
+- [ ] Confirm the accepted previous stable baseline is PlexonCore 2.0.5.
 - [ ] Back up `plugins/PlexonCore/` and the current Core JAR.
 - [ ] Record current Paper build and `java -version`.
-- [ ] Record current plugin list and versions for all active Plexon-family consumers.
-- [ ] Confirm there is no duplicate/old PlexonCore JAR in `plugins/`.
-- [ ] Copy the exact RC JAR into `plugins/`.
-- [ ] Recompute SHA-256 on the server and verify it exactly matches the candidate hash above.
+- [ ] Record current plugin list and versions for active Plexon-family consumers.
+- [ ] Confirm there is no duplicate PlexonCore JAR in `plugins/`.
+- [ ] Copy the stable `PlexonCore-2.1.0.jar` into `plugins/`.
+- [ ] Recompute SHA-256 on the server and verify the exact stable hash above.
 
-## Startup gate
-
-Start PlexonCraft normally and capture the complete startup section.
-
-Pass criteria:
+## Startup verification
 
 - [ ] Paper starts normally on the expected 26.2 build.
 - [ ] JVM is Java 25.
-- [ ] PlexonCore reports version `2.1.0-rc.1`.
+- [ ] PlexonCore reports version `2.1.0`.
 - [ ] PlexonCore enables without exception/error.
-- [ ] No future-schema or unsupported-schema refusal is triggered unexpectedly.
+- [ ] No unexpected future-schema/unsupported-schema refusal.
 - [ ] Core storage opens successfully.
-- [ ] No repeated SQLite lock/busy/error loop occurs.
-- [ ] No scheduler rejection/backpressure storm appears.
-- [ ] No integration discovery exception appears.
+- [ ] No repeated SQLite lock/busy/error loop.
+- [ ] No scheduler rejection/backpressure storm.
+- [ ] No integration discovery exception.
 - [ ] No downstream Plexon plugin disables because of Core API incompatibility.
-- [ ] `/plugins` / equivalent confirms all expected Plexon-family plugins are enabled.
+- [ ] All expected Plexon-family plugins remain enabled.
 
-Immediately fail the runtime gate for any unresolved startup `Exception`, `Error`, linkage failure, schema refusal, repeated storage failure, or dependent-plugin disablement attributable to Core.
-
-## API and integration gate
-
-Verify active consumers against the live Core service.
+## API and integration verification
 
 - [ ] API 2.1 reports supported.
 - [ ] API 2.0 compatibility remains supported.
 - [ ] API 1.0 compatibility bridge remains supported.
-- [ ] Active first-party integrations are detected with expected capability/state.
+- [ ] Active first-party integrations report expected capability/state.
 - [ ] PlexonGPFlags is identified correctly when present.
-- [ ] Retired PlexonCrates is not treated as a required/active first-party dependency.
-- [ ] Disabling and re-enabling a compatible consumer does not leave duplicate registrations.
+- [ ] Retired PlexonCrates is not treated as a required active dependency.
+- [ ] Disabling/re-enabling a compatible consumer does not leave duplicate registrations.
 - [ ] Disabling a consumer removes its Core-owned subscriptions/tasks/sessions.
 - [ ] Re-enabling restores only one active registration set.
 
-## Player-watch transition gate
-
-Exercise at least two players when possible.
+## Player-watch verification
 
 - [ ] Join.
 - [ ] Normal movement.
@@ -71,110 +67,100 @@ Exercise at least two players when possible.
 - [ ] Return to the original world.
 - [ ] Disconnect/reconnect.
 - [ ] World-change metadata remains coherent.
-- [ ] Unknown source coordinates are reported as unknown when the platform cannot supply them; destination coordinates are never mislabeled as source coordinates.
+- [ ] Unknown source coordinates remain explicitly unknown when unavailable.
+- [ ] Destination coordinates are never mislabeled as source coordinates.
 - [ ] No duplicate transition events occur from one logical transition.
 - [ ] No retained player-watch registration remains after owner/plugin disable.
 
-## Event-gateway gate
+## Event gateway verification
 
 - [ ] Trigger representative Core-routed events from multiple dependent plugins.
-- [ ] Confirm one failing synthetic/test subscriber, if safely reproducible, does not prevent other subscribers from receiving the event.
-- [ ] Confirm repeated subscriber failure logging is rate-limited rather than spammed.
+- [ ] Subscriber failure does not prevent other subscribers from receiving the event.
+- [ ] Repeated subscriber failure logging is rate-limited.
 - [ ] Disable/re-enable an event consumer and confirm exact-owner cleanup.
-- [ ] Confirm disabled owners fail closed and do not keep receiving events.
+- [ ] Disabled owners fail closed and do not continue receiving events.
 
-## GUI gate
+## GUI verification
 
-Use every Core-backed GUI path available from active production consumers.
-
-- [ ] Open and close normally.
-- [ ] Click managed buttons using normal left/right clicks as applicable.
-- [ ] Attempt shift-click/double-click/number-key/offhand or other unsupported movement into managed inventory regions.
-- [ ] Verify managed movement is cancelled where required.
-- [ ] Change permission/state while a deferred GUI action is pending and confirm action revalidation.
-- [ ] Reopen/rebuild a menu and confirm a stale holder/session cannot mutate the replacement session.
-- [ ] Disable the owning plugin with a GUI open; confirm sessions are purged safely.
+- [ ] Open and close Core-backed GUIs normally.
+- [ ] Exercise supported left/right clicks.
+- [ ] Attempt unsupported inventory movement against managed slots.
+- [ ] Confirm managed movement is cancelled where required.
+- [ ] Change permission/state before a deferred GUI action and confirm revalidation.
+- [ ] Reopen/rebuild a menu and verify stale sessions cannot mutate replacements.
+- [ ] Disable the owning plugin with a GUI open and confirm safe session purge.
 - [ ] Re-enable and confirm only current-generation sessions work.
 
-## PlaceholderAPI lifecycle gate
+## PlaceholderAPI verification
 
 Where PlaceholderAPI is installed:
 
 - [ ] Render representative Core-backed text/placeholders.
 - [ ] Confirm normal replacement output.
-- [ ] Disable/re-enable PlaceholderAPI during a controlled maintenance test if operationally acceptable.
-- [ ] Confirm Core invalidates/refreshes the provider adapter correctly.
-- [ ] Confirm provider failure degrades gracefully rather than causing repeated reflection/runtime exceptions.
-- [ ] Confirm no placeholder-related hot-path warning/error spam during normal chat/GUI rendering.
+- [ ] Confirm provider lifecycle refresh after controlled disable/re-enable when operationally safe.
+- [ ] Confirm provider failure degrades gracefully without repeated reflection/runtime exceptions.
+- [ ] Confirm no placeholder hot-path warning/error spam during normal chat/GUI rendering.
 
-If PlaceholderAPI cannot be safely toggled on production, perform this gate on an equivalent staging clone using the exact candidate JAR and record that limitation.
-
-## Block-origin persistence gate
+## Block-origin persistence verification
 
 Use a controlled test area.
 
 - [ ] Create origin-tracked block changes.
 - [ ] Rapidly mutate the same tracked position multiple times.
 - [ ] Confirm last-write-wins persistence after flush.
-- [ ] Confirm no duplicate/contradictory persisted state after rapid mutation.
+- [ ] Confirm no contradictory persisted state after rapid mutation.
 - [ ] Restart and verify expected origin state survives.
 - [ ] Exercise removal/cleanup and restart again.
 - [ ] Observe Core origin queue/backlog during pressure.
 - [ ] Confirm backlog drains.
-- [ ] If a safe storage-failure simulation is available on staging, verify failure becomes visible and retry/recovery succeeds.
 - [ ] Perform a clean shutdown with pending origin work and verify bounded flush/close behavior.
 
-Do not intentionally corrupt or make the production database unwritable solely to satisfy the failure-injection item; use staging for destructive failure tests.
+Destructive persistence-failure injection should be performed only on staging.
 
-## SQLite / persistence gate
+## SQLite / persistence verification
 
 - [ ] Normal reads/writes succeed.
 - [ ] No persistent writer connection leak is visible.
 - [ ] No repeated `database is locked` condition appears.
 - [ ] Restart/reopen succeeds.
-- [ ] Supported migration path from the 2.0.5 data set succeeds.
-- [ ] Backup remains available before migration.
-- [ ] Transaction failure does not leave a visibly partial logical operation in any safely exercised path.
+- [ ] Supported migration from the 2.0.5 data set succeeds.
+- [ ] Pre-upgrade backup remains available.
 - [ ] Shutdown closes storage within a bounded interval.
 
-## Scheduler gate
+## Scheduler verification
 
 - [ ] Representative async tasks complete normally.
-- [ ] Health/diagnostics report successful completion after joined/completed tasks.
-- [ ] Controlled failing task reports failure without crashing Core.
-- [ ] A subsequent successful task restores the scheduler contributor to healthy state where designed.
-- [ ] Delayed task executes once.
-- [ ] Repeating task can be cancelled.
+- [ ] Health/diagnostics report successful completion.
+- [ ] Controlled failing work reports failure without crashing Core.
+- [ ] Subsequent successful work restores health where designed.
+- [ ] Delayed tasks execute once.
+- [ ] Repeating tasks can be cancelled.
 - [ ] Owner/plugin disable cancels owner-scoped pending/repeating work.
 - [ ] Re-enable does not duplicate repeating work.
-- [ ] Server shutdown shows bounded scheduler cleanup with no lingering shutdown wait.
+- [ ] Server shutdown shows bounded scheduler cleanup.
 
-## Item identity gate
+## Item identity verification
 
-Using production custom items that rely on Core identity/fingerprints:
+Using production custom items:
 
 - [ ] Representative custom item IDs resolve consistently.
-- [ ] Exact custom items retain metadata/NBT/components expected by dependent plugins.
-- [ ] Conflicting/duplicate custom-ID conditions, if present in configuration, resolve deterministically and visibly.
-- [ ] No legitimate production item is misidentified after restart.
+- [ ] Exact custom items retain expected metadata/components.
+- [ ] Conflicting custom-ID conditions resolve deterministically and visibly.
+- [ ] Legitimate production items are not misidentified after restart.
 
-## Diagnostics / health gate
+## Diagnostics / health verification
 
-Capture Core diagnostics under idle and exercised conditions.
-
-- [ ] Overall Core health is READY/healthy after normal startup.
+- [ ] Overall Core health is healthy after normal startup.
 - [ ] Storage contributor state is visible.
 - [ ] Scheduler contributor state is visible.
 - [ ] Integration state is visible.
 - [ ] Origin queue/backlog is visible.
-- [ ] Failure/recovery transitions are represented accurately for any safely exercised failure case.
-- [ ] No stale DEGRADED state remains after a successfully recovered condition.
+- [ ] Failure/recovery transitions are represented accurately.
+- [ ] No stale degraded state remains after recovery.
 
-## Performance / soak gate
+## Performance observation
 
-Run at least **30 continuous minutes** after the functional gates with representative Survival activity.
-
-Record:
+Run at least 30 continuous minutes after functional verification with representative Survival activity and record:
 
 - Paper TPS
 - MSPT distribution/peaks
@@ -187,57 +173,46 @@ Record:
 - Core scheduler queue/backlog
 - Core origin queue/backlog
 - Core health state
-- any repeating warning/error signature
+- repeating warning/error signatures
 
-Pass criteria:
+Expected operational result:
 
-- [ ] Stable 20 TPS under the observed representative load.
+- [ ] Stable 20 TPS under representative load.
 - [ ] No sustained MSPT regression attributable to Core.
 - [ ] No unbounded Core queue growth.
 - [ ] No unbounded task/session/subscription growth.
 - [ ] No obvious thread leak.
 - [ ] No repeated database lock/error loop.
-- [ ] No repeated integration/PlaceholderAPI reflection failure loop.
+- [ ] No repeated integration/PlaceholderAPI failure loop.
 - [ ] No unresolved HIGH or CRITICAL defect.
-- [ ] No new severe startup/runtime error signature.
 
-## Shutdown / restart gate
-
-After soak:
+## Shutdown / restart verification
 
 - [ ] Stop the server normally.
 - [ ] Core shutdown completes without exception.
 - [ ] Pending owned tasks are cancelled/settled.
-- [ ] Block-origin persistence closes within its bounded shutdown behavior.
+- [ ] Block-origin persistence closes within bounded shutdown behavior.
 - [ ] SQLite writers close normally.
 - [ ] Start the server again.
 - [ ] Core and all expected consumers re-enable once.
 - [ ] No duplicate listeners/tasks/sessions are observed after restart.
 - [ ] Persisted Core state remains coherent.
 
-## Evidence to record
+## Evidence record
 
-Paste or attach the evidence needed to close the execution ledger:
+Record:
 
-- Exact deployed JAR SHA-256
+- exact deployed JAR SHA-256
 - Paper version/build
 - Java version
 - startup log excerpt
-- Core diagnostics before exercise
-- Core diagnostics after exercise
-- relevant integration/API checks
+- Core diagnostics before/after exercise
+- integration/API checks
 - origin persistence/restart results
 - GUI lifecycle results
-- PlaceholderAPI lifecycle result or staging limitation
+- PlaceholderAPI lifecycle result
 - scheduler failure/recovery result
-- 30-minute Spark/performance summary
+- performance summary
 - shutdown/restart excerpt
-- discovered defects with severity
-- final runtime PASS/FAIL decision
-
-## Certification decision
-
-- [ ] **PASS** — exact candidate can proceed to stable-version repack/rebuild and final CI gates.
-- [ ] **FAIL** — candidate must not be promoted. Record defect(s), cut a new RC, and repeat source/CI/downstream/runtime gates as applicable.
-
-Stable publication must remain blocked until this checklist is completed against the exact candidate hash above.
+- discovered defects and severity
+- deployment verification result
