@@ -119,8 +119,7 @@ public final class CoreScheduler implements AutoCloseable {
             recordFailure(lane + "-rejected", ex);
             return CompletableFuture.failedFuture(ex);
         }
-        observeFuture(owner, lane, future);
-        return future;
+        return observeFuture(owner, lane, future);
     }
 
     private <T> CompletableFuture<T> supply(Plugin owner, String lane, Supplier<T> supplier,
@@ -139,23 +138,36 @@ public final class CoreScheduler implements AutoCloseable {
             recordFailure(lane + "-rejected", ex);
             return CompletableFuture.failedFuture(ex);
         }
-        observeFuture(owner, lane, future);
-        return future;
+        return observeFuture(owner, lane, future);
     }
 
-    private void observeFuture(Plugin owner, String lane, CompletableFuture<?> future) {
-        if (owner != null) ownerFutures.computeIfAbsent(owner, ignored -> ConcurrentHashMap.newKeySet()).add(future);
-        future.whenComplete((ignored, error) -> {
+    /**
+     * Returns a completion future that becomes visible to callers only after Core has committed
+     * owner bookkeeping and scheduler health. This prevents a successful join from racing a stale
+     * DEGRADED health snapshot.
+     */
+    private <T> CompletableFuture<T> observeFuture(Plugin owner, String lane, CompletableFuture<T> source) {
+        if (owner != null) ownerFutures.computeIfAbsent(owner, ignored -> ConcurrentHashMap.newKeySet()).add(source);
+        CompletableFuture<T> observed = new CompletableFuture<>();
+        source.whenComplete((value, error) -> {
             if (owner != null) {
                 Set<CompletableFuture<?>> set = ownerFutures.get(owner);
                 if (set != null) {
-                    set.remove(future);
+                    set.remove(source);
                     if (set.isEmpty()) ownerFutures.remove(owner, set);
                 }
             }
-            if (error == null) markSuccess();
-            else if (!(unwrap(error) instanceof OwnerDisabledException) && !future.isCancelled()) recordFailure(lane, unwrap(error));
+            if (error == null) {
+                markSuccess();
+                observed.complete(value);
+                return;
+            }
+            Throwable root = unwrap(error);
+            if (!(root instanceof OwnerDisabledException) && !source.isCancelled()) recordFailure(lane, root);
+            if (source.isCancelled()) observed.cancel(false);
+            else observed.completeExceptionally(root);
         });
+        return observed;
     }
 
     public TaskHandle schedulePrimary(Duration delay, Runnable task) {
