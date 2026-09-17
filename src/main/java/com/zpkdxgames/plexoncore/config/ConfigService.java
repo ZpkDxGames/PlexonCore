@@ -17,19 +17,35 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class ConfigService {
     private static final DateTimeFormatter BACKUP_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
+    private static final List<String> RESTART_REQUIRED_KEYS = List.of(
+            "executor.worker-threads",
+            "executor.queue-capacity",
+            "executor.io-threads",
+            "executor.io-queue-capacity",
+            "origin-persistence.flush-interval-ms",
+            "origin-persistence.batch-size",
+            "origin-persistence.pressure-threshold",
+            "origin-persistence.max-retries");
+    private static final List<String> DEPRECATED_KEYS = List.of("gui.click-sound", "diagnostics.verbose-startup");
 
     private final JavaPlugin plugin;
     private final TextService textService;
     private final Path root;
     private final AtomicReference<ConfigSnapshot> coreSnapshot = new AtomicReference<>(ConfigSnapshot.empty());
+    private final AtomicReference<Set<String>> restartRequiredSettings = new AtomicReference<>(Set.of());
+    private final Set<String> loggedDeprecations = ConcurrentHashMap.newKeySet();
+    private volatile ConfigSnapshot startupSnapshot;
     private volatile ValidationResult lastValidation = ValidationResult.ok();
     private volatile long successfulReloads;
     private volatile long failedReloads;
@@ -45,7 +61,12 @@ public final class ConfigService {
             Files.createDirectories(root);
             Path config = resolveSafe("config.yml");
             if (Files.notExists(config)) copyBundled("config.yml", config);
-            return reloadCore();
+            ValidationResult result = reloadCore();
+            if (result.valid()) {
+                startupSnapshot = coreSnapshot.get();
+                restartRequiredSettings.set(Set.of());
+            }
+            return result;
         } catch (Exception ex) {
             failedReloads++;
             lastValidation = ValidationResult.fail("config.yml", ex.getMessage());
@@ -53,6 +74,7 @@ public final class ConfigService {
         }
     }
 
+    /** Prepare -> validate -> commit one immutable Core config generation. */
     public synchronized ValidationResult reloadCore() {
         try {
             Path config = resolveSafe("config.yml");
@@ -62,7 +84,12 @@ public final class ConfigService {
                 lastValidation = result.validation();
                 return result.validation();
             }
-            coreSnapshot.set(result.snapshot());
+
+            ConfigSnapshot candidate = result.snapshot();
+            logDeprecatedKeys(candidate);
+            Set<String> restartRequired = compareRestartRequired(candidate, startupSnapshot);
+            coreSnapshot.set(candidate);
+            restartRequiredSettings.set(restartRequired);
             successfulReloads++;
             lastValidation = ValidationResult.ok();
             return lastValidation;
@@ -121,7 +148,11 @@ public final class ConfigService {
             YamlConfiguration yaml = loadYaml(path);
             int current = yaml.getInt("schema-version", 0);
             int originalVersion = current;
-            if (current >= targetVersion) return new MigrationResult(true, current, current, null, "Already current");
+            if (current > targetVersion) {
+                return new MigrationResult(false, current, current, null,
+                        "Future schema " + current + " is newer than supported schema " + targetVersion);
+            }
+            if (current == targetVersion) return new MigrationResult(true, current, current, null, "Already current");
             Path backup = backup(relativePath);
             Map<Integer, ConfigMigration> byFrom = new LinkedHashMap<>();
             for (ConfigMigration migration : migrations) byFrom.put(migration.fromVersion(), migration);
@@ -145,6 +176,8 @@ public final class ConfigService {
     public ValidationResult lastValidation() { return lastValidation; }
     public long successfulReloads() { return successfulReloads; }
     public long failedReloads() { return failedReloads; }
+    public Set<String> restartRequiredSettings() { return restartRequiredSettings.get(); }
+    public boolean restartRequired() { return !restartRequiredSettings.get().isEmpty(); }
 
     private LoadResult loadCandidate(Path path, List<ConfigValidator> validators) throws IOException, InvalidConfigurationException {
         YamlConfiguration yaml = loadYaml(path);
@@ -166,8 +199,22 @@ public final class ConfigService {
         if (schemaVersion != 1) return ValidationResult.fail("schema-version", "Expected schema-version 1");
         int workers = yaml.getInt("executor.worker-threads", 2);
         int queue = yaml.getInt("executor.queue-capacity", 4096);
+        int ioWorkers = yaml.getInt("executor.io-threads", 1);
+        int ioQueue = yaml.getInt("executor.io-queue-capacity", 2048);
         if (workers < 1 || workers > 32) return ValidationResult.fail("executor.worker-threads", "Must be between 1 and 32");
         if (queue < 64 || queue > 100_000) return ValidationResult.fail("executor.queue-capacity", "Must be between 64 and 100000");
+        if (ioWorkers < 1 || ioWorkers > 8) return ValidationResult.fail("executor.io-threads", "Must be between 1 and 8");
+        if (ioQueue < 64 || ioQueue > 100_000) return ValidationResult.fail("executor.io-queue-capacity", "Must be between 64 and 100000");
+
+        int flushMillis = yaml.getInt("origin-persistence.flush-interval-ms", 500);
+        int batchSize = yaml.getInt("origin-persistence.batch-size", 512);
+        int pressure = yaml.getInt("origin-persistence.pressure-threshold", 2048);
+        int retries = yaml.getInt("origin-persistence.max-retries", 6);
+        if (flushMillis < 50 || flushMillis > 30_000) return ValidationResult.fail("origin-persistence.flush-interval-ms", "Must be between 50 and 30000");
+        if (batchSize < 16 || batchSize > 10_000) return ValidationResult.fail("origin-persistence.batch-size", "Must be between 16 and 10000");
+        if (pressure < batchSize || pressure > 100_000) return ValidationResult.fail("origin-persistence.pressure-threshold", "Must be >= batch-size and <= 100000");
+        if (retries < 0 || retries > 20) return ValidationResult.fail("origin-persistence.max-retries", "Must be between 0 and 20");
+
         String mode = yaml.getString("text.placeholder-rendering.default", "SAFE");
         try {
             TextService.TextMode.valueOf(mode.toUpperCase());
@@ -186,6 +233,24 @@ public final class ConfigService {
             if (!result.valid()) return ValidationResult.fail(key, result.reason());
         }
         return ValidationResult.ok();
+    }
+
+    private Set<String> compareRestartRequired(ConfigSnapshot candidate, ConfigSnapshot baseline) {
+        if (baseline == null) return Set.of();
+        Set<String> changed = new LinkedHashSet<>();
+        for (String key : RESTART_REQUIRED_KEYS) {
+            Object before = baseline.values().get(key);
+            Object after = candidate.values().get(key);
+            if (!Objects.equals(before, after)) changed.add(key);
+        }
+        return Collections.unmodifiableSet(changed);
+    }
+
+    private void logDeprecatedKeys(ConfigSnapshot candidate) {
+        for (String key : DEPRECATED_KEYS) {
+            if (!candidate.values().containsKey(key) || !loggedDeprecations.add(key)) continue;
+            plugin.getLogger().warning("Deprecated PlexonCore config key is ignored and may be removed: " + key);
+        }
     }
 
     private void copyBundled(String resource, Path target) throws IOException {
