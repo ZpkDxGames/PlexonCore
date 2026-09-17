@@ -2,22 +2,19 @@
 
 ## Release state
 
-`FINAL STABLE RELEASE PIPELINE`
+`FINAL STABLE — AUTOMATED GATES PASSED`
 
-PlexonCore 2.1.0 uses a stable-only release policy. The 2.1 source line has completed the deep source audit and hardening cycle; prerelease identifiers are no longer used for publication. Final promotion requires the full-version Core build/distribution gate and the complete downstream compatibility matrix to pass.
+PlexonCore now follows a stable-only release policy. The deep source audit/hardening cycle is complete, the project version is `2.1.0`, the final Core build/distribution gate is green, and the full 14-plugin downstream compatibility matrix is green.
 
-## Verified baseline
+## Baseline and target
 
 - Repository: `ZpkDxGames/PlexonCore`
 - Previous stable tag: `v2.0.5`
-- Previous `main` SHA: `f043828525c0c0e9afd4d3a5f8863082a8d08778`
-- Previous `release/stable` SHA: `f043828525c0c0e9afd4d3a5f8863082a8d08778`
-- Previous stable JAR: `PlexonCore-2.0.5.jar`
+- Previous stable SHA: `f043828525c0c0e9afd4d3a5f8863082a8d08778`
 - Previous stable JAR SHA-256: `bf4df796e83571e76c06b296c75c5e73ddc8053cb2c587d74c08cd3922e0b4d4`
-- Target stable release: `2.1.0`
+- Final release: `2.1.0`
 - Paper target: `26.2.build.121-stable`
 - Java target: `25` / class major `69`
-- Baseline API: `2.0`, retaining the `1.0` compatibility bridge
 - Stable API: additive `2.1`, retaining API 2.0 and API 1.0 compatibility
 
 ## Deep source hardening completed
@@ -35,43 +32,48 @@ PlexonCore 2.1.0 uses a stable-only release policy. The 2.1 source line has comp
 11. Bounded expiry-driven event dedupe without whole-map hot scans.
 12. Immutable configuration publication, validation, deprecation tolerance, explicit restart-required settings, and future-schema refusal.
 13. Additive API 2.1 contract while preserving API 2.0 and API 1.0 compatibility.
-14. Expanded regression coverage across lifecycle, persistence, scheduler, GUI, integrations, configuration, identity, and compatibility paths.
-15. Cross-repository compatibility workflow for the full production Plexon plugin set.
+14. Expanded lifecycle, persistence, scheduler, GUI, integration, configuration, identity, and compatibility regression coverage.
+15. Cross-repository compatibility workflow for the production Plexon plugin set.
 
 No PlexonPanel code was changed. PlexonCrates was not revived.
 
-## Pre-final evidence
+## Final stable artifact evidence
 
-The hardened 2.1 implementation previously passed the source/build boundary before the stable version conversion:
+- Audited/hardened runtime source SHA: `b259f6116ab26831ab250e0b61335908b87e71fa`
+- Final stable conversion source SHA: `f13b94210febf5ea62d03be89081d1750b49cbe9`
+- Difference after hardened source: release docs plus one POM version change from `2.1.0-rc.1` to `2.1.0`; no production Java/resource behavior changes
+- Branch-head Build run: `35285439890` — **SUCCESS**
+- Final stable JAR: `PlexonCore-2.1.0.jar`
+- Final JAR size: `12,244,388` bytes
+- Final JAR SHA-256: `6ee352f0a913aa7bce193a5f793132e893ea168f35793045191c0fa9ceea6ed6`
+- Artifact ID: `10524405378`
+- Artifact ZIP digest: `sha256:fa0f69bfec006065a0ff9147ebe968f48d8902539b1ad3bcf43447fe4badc77b`
+- Independent downloaded-artifact checksum verification: **PASS**
 
-- Hardened source SHA: `b259f6116ab26831ab250e0b61335908b87e71fa`
-- Core Build run: `35270431101` — **SUCCESS**
-- Tests: **66 run / 0 failures / 0 errors / 0 skipped**
-- Downstream Compatibility run: `35270431237` — **SUCCESS**
-- Downstream matrix: **14/14 successful**
-- Documentation-sealed branch build: `35279930633` — **SUCCESS**
+## Core final build gate
 
-This evidence validates the hardened implementation. The final stable version commit is required to rerun both Core and downstream gates before promotion.
+Build run `35285439890` completed **SUCCESS** for the final `2.1.0` branch head.
 
-## Final stable build requirements
-
-The 2.1.0 final commit must verify:
+Verified by the workflow:
 
 - Maven `clean verify`
-- all regression tests
-- exact `plugin.yml` version = `2.1.0`
-- PlexonCore main class present
-- BlockOrigin runtime class present
-- SQLite JDBC shaded
-- Bukkit/Paper/Adventure server APIs not shaded
+- complete test suite
+- distribution contract
+- exact embedded `plugin.yml` version
+- PlexonCore main class
+- BlockOrigin runtime class
+- SQLite JDBC shading
+- exclusion of Bukkit/Paper/Adventure server APIs from shading
 - Java class major `69`
 - Paper pin `26.2.build.121-stable`
-- final JAR checksum generation and validation
+- JAR SHA generation/check
 - `git diff --check`
 
-## Downstream compatibility requirements
+## Downstream compatibility gate
 
-The final `2.1.0` artifact must build/test successfully against:
+Final-version Downstream Compatibility run `35285433368` completed successfully.
+
+Result: **14/14 PASS**
 
 - PlexonUtility
 - PlexonSpawners
@@ -88,40 +90,37 @@ The final `2.1.0` artifact must build/test successfully against:
 - PlexonBackpacks
 - PlexonGPFlags
 
-Downstream repositories must remain unmodified.
+The compatibility run was triggered by the final POM version conversion at `71ca2bf5dafd8b16b3c5600885145bd95497ddda`. Commits after that point and before the final branch-head build altered documentation only, so no runtime/build inputs changed between the compatibility artifact and the final branch artifact.
 
-## Runtime verification policy
+Downstream repositories were not committed or patched.
 
-Live-host certification remains strongly recommended and is documented in:
-
-`docs/release/PLEXONCORE_2.1.0_RUNTIME_CERTIFICATION.md`
-
-Under the stable-only policy it is no longer represented by a prerelease version. The checklist is used for deployment verification, performance observation, rollback validation, and post-release operational evidence.
-
-A stable GitHub Release must never be described as live-certified unless that live evidence has actually been collected.
-
-## Release engineering
+## Release engineering state
 
 - Project version: `2.1.0`
 - Stable release notes: `.release/2.1.0.md`
 - Stable workflow: `.github/workflows/release.yml`
-- Release workflow requires stable-version semantics.
-- Release workflow requires exact `main` / `release/stable` SHA parity.
-- Release workflow rebuilds/verifies the distribution before publishing.
-- Published assets: `PlexonCore-2.1.0.jar` and `SHA256SUMS.txt`.
-- Previous `v2.0.5` remains the rollback baseline.
+- Stable workflow refuses prerelease version strings.
+- Stable workflow requires exact `main` / `release/stable` SHA parity.
+- Stable workflow rebuilds/verifies the distribution before publication.
+- Release assets: `PlexonCore-2.1.0.jar` and `SHA256SUMS.txt`.
+- Previous `v2.0.5` remains rollback baseline.
 
-## Stable closure sequence
+## Runtime verification policy
 
-1. Commit the version conversion to `2.1.0`.
-2. Require final-version Core Build success.
-3. Require final-version Downstream Compatibility success across all 14 repositories.
-4. Merge the verified stable source to `main`.
-5. Confirm the `main` build is green.
-6. Advance `release/stable` to the exact verified `main` SHA.
-7. Allow the stable release workflow to build and publish `v2.1.0`.
-8. Verify tag/source provenance, release assets, JAR checksum, and rollback availability.
-9. Record live deployment/runtime evidence separately when the production host is upgraded.
+Deployment verification is retained at:
+
+`docs/release/PLEXONCORE_2.1.0_RUNTIME_CERTIFICATION.md`
+
+The stable artifact identity is pinned there. Live runtime evidence is recorded separately and must not be claimed unless actually collected.
+
+## Final promotion sequence
+
+1. Merge the verified stable branch into `main`.
+2. Confirm the resulting `main` build is green.
+3. Advance `release/stable` to the exact verified `main` SHA.
+4. Allow the Release workflow to build and publish `v2.1.0`.
+5. Verify the tag target, GitHub Release, JAR, SHA-256, and rollback baseline.
+6. Record production deployment evidence after PlexonCraft is upgraded.
 
 ## Current decision
 
@@ -129,4 +128,8 @@ A stable GitHub Release must never be described as live-certified unless that li
 
 **Deep source audit/hardening: COMPLETE.**
 
-**Final stable publication: gated only by the final-version automated build, downstream compatibility, branch parity, and release workflow.**
+**Final Core Build: PASS.**
+
+**Final downstream compatibility: 14/14 PASS.**
+
+**Ready for stable promotion to `main` and `release/stable`.**
