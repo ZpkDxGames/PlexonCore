@@ -84,14 +84,29 @@ jobs:
           path: downstream
           persist-credentials: false
 
-      - name: Verify downstream tracked source is untouched
+      - name: Capture checkout baseline and inject file-based Core candidate
         working-directory: downstream
         shell: bash
         run: |
           set -euo pipefail
-          git status --short --untracked-files=no
-          git diff --quiet
-          git diff --cached --quiet
+          # Some repositories normalize wrapper line endings during checkout. Preserve that exact
+          # checkout state as the integrity baseline, then prove the compatibility build adds no
+          # further tracked changes.
+          git diff --binary HEAD > "${RUNNER_TEMP}/downstream-before.diff"
+          git diff --cached --binary HEAD > "${RUNNER_TEMP}/downstream-before-cached.diff"
+
+          # A few Gradle consumers intentionally compile against libs/PlexonCore-<version>.jar
+          # instead of a Maven coordinate. Inject the exact RC bytes only into the ephemeral
+          # checkout; these files are untracked and downstream repositories remain untouched.
+          mapfile -t local_core_paths < <(
+            grep -RhoE 'libs/PlexonCore-[A-Za-z0-9._-]+\.jar' \
+              --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null | sort -u || true
+          )
+          for core_path in "${local_core_paths[@]}"; do
+            mkdir -p "$(dirname "${core_path}")"
+            cp "${CORE_CANDIDATE_JAR}" "${core_path}"
+            echo "Injected exact Core candidate at ${core_path}"
+          done
 
       - name: Run downstream compatibility tests
         working-directory: downstream
@@ -101,9 +116,8 @@ jobs:
           echo "Testing ${{ matrix.repository }} against PlexonCore candidate ${CORE_CANDIDATE_VERSION}"
           if [[ -f pom.xml ]]; then
             mvn -B -ntp clean test
-          elif [[ -x ./gradlew || -f ./gradlew ]]; then
-            chmod +x ./gradlew
-            ./gradlew clean test --no-daemon --stacktrace
+          elif [[ -f ./gradlew ]]; then
+            bash ./gradlew clean test --no-daemon --stacktrace
           elif [[ -f build.gradle.kts || -f build.gradle ]]; then
             gradle clean test --no-daemon --stacktrace
           else
@@ -111,14 +125,17 @@ jobs:
             exit 1
           fi
 
-      - name: Confirm downstream tracked files remained unmodified
+      - name: Confirm compatibility build did not mutate tracked downstream files
         if: always()
         working-directory: downstream
         shell: bash
         run: |
           set -euo pipefail
-          if ! git diff --quiet || ! git diff --cached --quiet; then
+          git diff --binary HEAD > "${RUNNER_TEMP}/downstream-after.diff"
+          git diff --cached --binary HEAD > "${RUNNER_TEMP}/downstream-after-cached.diff"
+          if ! cmp -s "${RUNNER_TEMP}/downstream-before.diff" "${RUNNER_TEMP}/downstream-after.diff" \
+              || ! cmp -s "${RUNNER_TEMP}/downstream-before-cached.diff" "${RUNNER_TEMP}/downstream-after-cached.diff"; then
             git status --short --untracked-files=no
-            echo "Compatibility job modified tracked downstream files; refusing certification." >&2
+            echo "Compatibility build modified tracked downstream files; refusing certification." >&2
             exit 1
           fi
