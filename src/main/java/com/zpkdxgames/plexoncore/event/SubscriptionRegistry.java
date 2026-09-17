@@ -2,6 +2,7 @@ package com.zpkdxgames.plexoncore.event;
 
 import com.zpkdxgames.plexoncore.context.CoreBlockBreakContext;
 import org.bukkit.Material;
+import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -20,8 +21,12 @@ final class SubscriptionRegistry {
     private volatile int routeCount;
 
     synchronized SubscriptionHandle subscribe(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
+        return subscribe(null, moduleId, subscription, handler);
+    }
+
+    synchronized SubscriptionHandle subscribe(Plugin owner, String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
         String normalized = normalizeModuleId(moduleId);
-        Subscriber subscriber = new Subscriber(normalized, Objects.requireNonNull(subscription), Objects.requireNonNull(handler));
+        Subscriber subscriber = new Subscriber(owner, normalized, Objects.requireNonNull(subscription), Objects.requireNonNull(handler));
         for (Material material : subscription.materials()) {
             List<Subscriber> list = new ArrayList<>(mutableRoutes.getOrDefault(material, List.of()));
             list.add(subscriber);
@@ -38,20 +43,46 @@ final class SubscriptionRegistry {
 
     int routeCount() { return routeCount; }
 
+    synchronized int purgeOwner(Plugin owner) {
+        if (owner == null) return 0;
+        Set<Subscriber> removed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Material material : Material.values()) {
+            List<Subscriber> current = mutableRoutes.get(material);
+            if (current == null || current.isEmpty()) continue;
+            List<Subscriber> next = new ArrayList<>(current.size());
+            for (Subscriber subscriber : current) {
+                if (subscriber.owner() == owner) removed.add(subscriber);
+                else next.add(subscriber);
+            }
+            replace(material, next);
+        }
+        return removed.size();
+    }
+
+    synchronized void clear() {
+        mutableRoutes.clear();
+        for (int i = 0; i < compiledRoutes.length(); i++) compiledRoutes.set(i, null);
+        routeCount = 0;
+    }
+
     private synchronized void unsubscribe(Subscriber subscriber) {
         for (Material material : subscriber.subscription().materials()) {
             List<Subscriber> current = mutableRoutes.get(material);
             if (current == null) continue;
             List<Subscriber> next = new ArrayList<>(current);
             next.remove(subscriber);
-            if (next.isEmpty()) {
-                mutableRoutes.remove(material);
-                if (compiledRoutes.get(material.ordinal()) != null) routeCount--;
-                compiledRoutes.set(material.ordinal(), null);
-            } else {
-                mutableRoutes.put(material, next);
-                compile(material, next);
-            }
+            replace(material, next);
+        }
+    }
+
+    private void replace(Material material, List<Subscriber> next) {
+        if (next.isEmpty()) {
+            mutableRoutes.remove(material);
+            if (compiledRoutes.get(material.ordinal()) != null) routeCount--;
+            compiledRoutes.set(material.ordinal(), null);
+        } else {
+            mutableRoutes.put(material, next);
+            compile(material, next);
         }
     }
 
@@ -73,7 +104,31 @@ final class SubscriptionRegistry {
     }
 
     @FunctionalInterface interface CoreBlockBreakHandler { void handle(CoreBlockBreakContext context); }
-    record Subscriber(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {}
+
+    static final class Subscriber {
+        private final Plugin owner;
+        private final String moduleId;
+        private final CoreBlockSubscription subscription;
+        private final CoreBlockBreakHandler handler;
+
+        Subscriber(String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
+            this(null, moduleId, subscription, handler);
+        }
+
+        Subscriber(Plugin owner, String moduleId, CoreBlockSubscription subscription, CoreBlockBreakHandler handler) {
+            this.owner = owner;
+            this.moduleId = Objects.requireNonNull(moduleId);
+            this.subscription = Objects.requireNonNull(subscription);
+            this.handler = Objects.requireNonNull(handler);
+        }
+
+        Plugin owner() { return owner; }
+        String moduleId() { return moduleId; }
+        CoreBlockSubscription subscription() { return subscription; }
+        CoreBlockBreakHandler handler() { return handler; }
+        boolean ownerEnabled() { return owner == null || owner.isEnabled(); }
+    }
+
     record RoutePlan(List<Subscriber> subscribers, boolean requiresNaturalOrigin, Set<String> itemIdentityNamespaces) {
         static final RoutePlan EMPTY = new RoutePlan(List.of(), false, Set.of());
         boolean empty() { return subscribers.isEmpty(); }
