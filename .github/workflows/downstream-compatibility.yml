@@ -1,0 +1,141 @@
+name: Downstream Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'agent/2.1.0-full-stable-hardening'
+    paths:
+      - 'pom.xml'
+      - 'src/**'
+      - '.github/workflows/downstream-compatibility.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  downstream:
+    name: ${{ matrix.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        repository:
+          - PlexonUtility
+          - PlexonSpawners
+          - PlexonKeys
+          - PlexonChats
+          - PlexonQuests
+          - PlexonRanks
+          - PlexonShops
+          - PlexonSkills
+          - PlexonTools
+          - PlexonHomes
+          - PlexonTravel
+          - PlexonJobs
+          - PlexonBackpacks
+          - PlexonGPFlags
+
+    steps:
+      - name: Checkout PlexonCore candidate
+        uses: actions/checkout@v5
+        with:
+          path: core
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build and install exact Core candidate
+        working-directory: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -DskipTests clean install
+          version="$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          jar_path="target/PlexonCore-${version}.jar"
+          test -s "${jar_path}"
+          echo "CORE_CANDIDATE_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "CORE_CANDIDATE_JAR=${GITHUB_WORKSPACE}/core/${jar_path}" >> "$GITHUB_ENV"
+
+      - name: Install compatibility coordinate aliases
+        working-directory: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          for alias in 1.0.0 2.0.0 2.0.1 2.0.2 2.0.3 2.0.4 2.0.5; do
+            mvn -B -ntp install:install-file \
+              -Dfile="${CORE_CANDIDATE_JAR}" \
+              -DgroupId=com.zpkdxgames \
+              -DartifactId=PlexonCore \
+              -Dversion="${alias}" \
+              -Dpackaging=jar \
+              -DgeneratePom=true
+          done
+
+      - name: Checkout downstream repository
+        uses: actions/checkout@v5
+        with:
+          repository: ZpkDxGames/${{ matrix.repository }}
+          path: downstream
+          persist-credentials: false
+
+      - name: Capture checkout baseline and inject file-based Core candidate
+        working-directory: downstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Some repositories normalize wrapper line endings during checkout. Preserve that exact
+          # checkout state as the integrity baseline, then prove the compatibility build adds no
+          # further tracked changes.
+          git diff --binary HEAD > "${RUNNER_TEMP}/downstream-before.diff"
+          git diff --cached --binary HEAD > "${RUNNER_TEMP}/downstream-before-cached.diff"
+
+          # A few Gradle consumers intentionally compile against libs/PlexonCore-<version>.jar
+          # instead of a Maven coordinate. Inject the exact RC bytes only into the ephemeral
+          # checkout; these files are untracked and downstream repositories remain untouched.
+          mapfile -t local_core_paths < <(
+            grep -RhoE 'libs/PlexonCore-[A-Za-z0-9._-]+\.jar' \
+              --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null | sort -u || true
+          )
+          for core_path in "${local_core_paths[@]}"; do
+            mkdir -p "$(dirname "${core_path}")"
+            cp "${CORE_CANDIDATE_JAR}" "${core_path}"
+            echo "Injected exact Core candidate at ${core_path}"
+          done
+
+      - name: Run downstream compatibility tests
+        working-directory: downstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Testing ${{ matrix.repository }} against PlexonCore candidate ${CORE_CANDIDATE_VERSION}"
+          if [[ -f pom.xml ]]; then
+            mvn -B -ntp clean test
+          elif [[ -f ./gradlew ]]; then
+            bash ./gradlew clean test --no-daemon --stacktrace
+          elif [[ -f build.gradle.kts || -f build.gradle ]]; then
+            gradle clean test --no-daemon --stacktrace
+          else
+            echo "No supported JVM build entry point found for ${{ matrix.repository }}" >&2
+            exit 1
+          fi
+
+      - name: Confirm compatibility build did not mutate tracked downstream files
+        if: always()
+        working-directory: downstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary HEAD > "${RUNNER_TEMP}/downstream-after.diff"
+          git diff --cached --binary HEAD > "${RUNNER_TEMP}/downstream-after-cached.diff"
+          if ! cmp -s "${RUNNER_TEMP}/downstream-before.diff" "${RUNNER_TEMP}/downstream-after.diff" \
+              || ! cmp -s "${RUNNER_TEMP}/downstream-before-cached.diff" "${RUNNER_TEMP}/downstream-after-cached.diff"; then
+            git status --short --untracked-files=no
+            echo "Compatibility build modified tracked downstream files; refusing certification." >&2
+            exit 1
+          fi

@@ -6,16 +6,16 @@ text:
     allow-legacy: true
     allow-minimessage: true
 
-gui:
-  click-sound: UI_BUTTON_CLICK
-
-diagnostics:
-  verbose-startup: false
-
 executor:
-  # Bounded CPU lane. Default is selected from available processors when omitted by older configs.
+  # Executor sizing is validated on reload but takes effect only after restart.
   worker-threads: 2
   queue-capacity: 4096
-  # Separate bounded lane for blocking IO/query preparation. SQLite writes remain serialized per database.
   io-threads: 1
   io-queue-capacity: 2048
+
+origin-persistence:
+  # Coalesced Last-Write-Wins persistence. These settings are restart-required.
+  flush-interval-ms: 500
+  batch-size: 512
+  pressure-threshold: 2048
+  max-retries: 6

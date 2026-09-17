@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class ConfigService {
@@ -30,6 +32,9 @@ public final class ConfigService {
     private final TextService textService;
     private final Path root;
     private final AtomicReference<ConfigSnapshot> coreSnapshot = new AtomicReference<>(ConfigSnapshot.empty());
+    private final AtomicReference<Set<String>> restartRequiredSettings = new AtomicReference<>(Set.of());
+    private final Set<String> loggedDeprecations = ConcurrentHashMap.newKeySet();
+    private volatile ConfigSnapshot startupSnapshot;
     private volatile ValidationResult lastValidation = ValidationResult.ok();
     private volatile long successfulReloads;
     private volatile long failedReloads;
@@ -45,7 +50,12 @@ public final class ConfigService {
             Files.createDirectories(root);
             Path config = resolveSafe("config.yml");
             if (Files.notExists(config)) copyBundled("config.yml", config);
-            return reloadCore();
+            ValidationResult result = reloadCore();
+            if (result.valid()) {
+                startupSnapshot = coreSnapshot.get();
+                restartRequiredSettings.set(Set.of());
+            }
+            return result;
         } catch (Exception ex) {
             failedReloads++;
             lastValidation = ValidationResult.fail("config.yml", ex.getMessage());
@@ -53,16 +63,22 @@ public final class ConfigService {
         }
     }
 
+    /** Prepare -> validate -> commit one immutable Core config generation. */
     public synchronized ValidationResult reloadCore() {
         try {
             Path config = resolveSafe("config.yml");
-            LoadResult result = loadCandidate(config, List.of(this::validateCoreSchema, this::validateConfiguredMiniMessage));
+            LoadResult result = loadCandidate(config, List.of(CoreConfigPolicy::validateSchema, this::validateConfiguredMiniMessage));
             if (!result.validation().valid()) {
                 failedReloads++;
                 lastValidation = result.validation();
                 return result.validation();
             }
-            coreSnapshot.set(result.snapshot());
+
+            ConfigSnapshot candidate = result.snapshot();
+            logDeprecatedKeys(candidate);
+            Set<String> restartRequired = CoreConfigPolicy.restartRequired(candidate, startupSnapshot);
+            coreSnapshot.set(candidate);
+            restartRequiredSettings.set(restartRequired);
             successfulReloads++;
             lastValidation = ValidationResult.ok();
             return lastValidation;
@@ -121,7 +137,11 @@ public final class ConfigService {
             YamlConfiguration yaml = loadYaml(path);
             int current = yaml.getInt("schema-version", 0);
             int originalVersion = current;
-            if (current >= targetVersion) return new MigrationResult(true, current, current, null, "Already current");
+            if (current > targetVersion) {
+                return new MigrationResult(false, current, current, null,
+                        "Future schema " + current + " is newer than supported schema " + targetVersion);
+            }
+            if (current == targetVersion) return new MigrationResult(true, current, current, null, "Already current");
             Path backup = backup(relativePath);
             Map<Integer, ConfigMigration> byFrom = new LinkedHashMap<>();
             for (ConfigMigration migration : migrations) byFrom.put(migration.fromVersion(), migration);
@@ -145,6 +165,8 @@ public final class ConfigService {
     public ValidationResult lastValidation() { return lastValidation; }
     public long successfulReloads() { return successfulReloads; }
     public long failedReloads() { return failedReloads; }
+    public Set<String> restartRequiredSettings() { return restartRequiredSettings.get(); }
+    public boolean restartRequired() { return !restartRequiredSettings.get().isEmpty(); }
 
     private LoadResult loadCandidate(Path path, List<ConfigValidator> validators) throws IOException, InvalidConfigurationException {
         YamlConfiguration yaml = loadYaml(path);
@@ -161,22 +183,6 @@ public final class ConfigService {
         return yaml;
     }
 
-    private ValidationResult validateCoreSchema(YamlConfiguration yaml) {
-        int schemaVersion = yaml.getInt("schema-version", -1);
-        if (schemaVersion != 1) return ValidationResult.fail("schema-version", "Expected schema-version 1");
-        int workers = yaml.getInt("executor.worker-threads", 2);
-        int queue = yaml.getInt("executor.queue-capacity", 4096);
-        if (workers < 1 || workers > 32) return ValidationResult.fail("executor.worker-threads", "Must be between 1 and 32");
-        if (queue < 64 || queue > 100_000) return ValidationResult.fail("executor.queue-capacity", "Must be between 64 and 100000");
-        String mode = yaml.getString("text.placeholder-rendering.default", "SAFE");
-        try {
-            TextService.TextMode.valueOf(mode.toUpperCase());
-        } catch (IllegalArgumentException ex) {
-            return ValidationResult.fail("text.placeholder-rendering.default", "Expected SAFE, LEGACY or MINIMESSAGE");
-        }
-        return ValidationResult.ok();
-    }
-
     private ValidationResult validateConfiguredMiniMessage(YamlConfiguration yaml) {
         for (String key : yaml.getKeys(true)) {
             if (!key.toLowerCase().contains("message") && !key.toLowerCase().contains("title") && !key.toLowerCase().contains("prefix")) continue;
@@ -186,6 +192,13 @@ public final class ConfigService {
             if (!result.valid()) return ValidationResult.fail(key, result.reason());
         }
         return ValidationResult.ok();
+    }
+
+    private void logDeprecatedKeys(ConfigSnapshot candidate) {
+        for (String key : CoreConfigPolicy.deprecatedPresent(candidate)) {
+            if (!loggedDeprecations.add(key)) continue;
+            plugin.getLogger().warning("Deprecated PlexonCore config key is ignored and may be removed: " + key);
+        }
     }
 
     private void copyBundled(String resource, Path target) throws IOException {

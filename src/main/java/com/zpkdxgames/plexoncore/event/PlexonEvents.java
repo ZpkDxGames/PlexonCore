@@ -5,10 +5,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 
 public final class PlexonEvents {
     private PlexonEvents() {}
@@ -30,17 +31,58 @@ public final class PlexonEvents {
         }
     }
 
+    /**
+     * Bounded insertion-ordered TTL cache. Expiry and size eviction only walk the oldest entries,
+     * making normal membership/update work O(1) with amortized O(1) cleanup instead of scanning the
+     * full cache on every event.
+     */
     public static final class MemoryDedupe {
+        private static final int DEFAULT_MAX_ENTRIES = 4096;
         private final long ttlNanos;
-        private final Map<String, Long> seen = new ConcurrentHashMap<>();
-        public MemoryDedupe(Duration ttl) { this.ttlNanos = Math.max(Duration.ofSeconds(1).toNanos(), Objects.requireNonNull(ttl).toNanos()); }
-        public boolean first(String token) {
-            long now = System.nanoTime();
-            String hash = hashToken(token);
-            seen.entrySet().removeIf(entry -> now - entry.getValue() > ttlNanos);
-            return seen.putIfAbsent(hash, now) == null;
+        private final int maxEntries;
+        private final LinkedHashMap<String, Long> seen = new LinkedHashMap<>();
+
+        public MemoryDedupe(Duration ttl) {
+            this(ttl, DEFAULT_MAX_ENTRIES);
         }
-        public int size() { return seen.size(); }
+
+        public MemoryDedupe(Duration ttl, int maxEntries) {
+            this.ttlNanos = Math.max(Duration.ofSeconds(1).toNanos(), Objects.requireNonNull(ttl).toNanos());
+            if (maxEntries < 16 || maxEntries > 1_000_000) throw new IllegalArgumentException("maxEntries must be 16..1000000");
+            this.maxEntries = maxEntries;
+        }
+
+        public synchronized boolean first(String token) {
+            long now = System.nanoTime();
+            purgeExpired(now);
+            String hash = hashToken(token);
+            Long previous = seen.get(hash);
+            if (previous != null && now - previous <= ttlNanos) return false;
+            if (previous != null) seen.remove(hash);
+            seen.put(hash, now);
+            evictOverflow();
+            return true;
+        }
+
+        private void purgeExpired(long now) {
+            Iterator<Map.Entry<String, Long>> iterator = seen.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<String, Long> entry = iterator.next();
+                if (now - entry.getValue() <= ttlNanos) break;
+                iterator.remove();
+            }
+        }
+
+        private void evictOverflow() {
+            Iterator<String> iterator = seen.keySet().iterator();
+            while (seen.size() > maxEntries && iterator.hasNext()) {
+                iterator.next();
+                iterator.remove();
+            }
+        }
+
+        public synchronized int size() { return seen.size(); }
+        public int maximumSize() { return maxEntries; }
     }
 
     private static String sanitize(String source) {
