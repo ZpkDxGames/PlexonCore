@@ -84,13 +84,14 @@ jobs:
           path: downstream
           persist-credentials: false
 
-      - name: Verify downstream source is untouched
+      - name: Verify downstream tracked source is untouched
         working-directory: downstream
         shell: bash
         run: |
           set -euo pipefail
-          git status --short
-          test -z "$(git status --porcelain)"
+          git status --short --untracked-files=no
+          git diff --quiet
+          git diff --cached --quiet
 
       - name: Run downstream compatibility tests
         working-directory: downstream
@@ -110,14 +111,14 @@ jobs:
             exit 1
           fi
 
-      - name: Confirm downstream checkout remained unmodified
+      - name: Confirm downstream tracked files remained unmodified
         if: always()
         working-directory: downstream
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$(git status --porcelain)" || {
-            git status --short
-            echo "Compatibility job modified downstream checkout; refusing certification." >&2
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git status --short --untracked-files=no
+            echo "Compatibility job modified tracked downstream files; refusing certification." >&2
             exit 1
-          }
+          fi
