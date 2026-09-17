@@ -25,7 +25,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -35,7 +34,7 @@ public final class GuiService implements Listener, AutoCloseable {
     private static final Set<ClickType> ACTION_CLICKS = EnumSet.of(ClickType.LEFT, ClickType.RIGHT);
 
     private final Plugin corePlugin;
-    private final Map<UUID, SessionState> sessions = new ConcurrentHashMap<>();
+    private final GuiSessionRegistry sessions = new GuiSessionRegistry();
     private final AtomicLong generations = new AtomicLong();
 
     public GuiService(Plugin plugin) {
@@ -87,27 +86,22 @@ public final class GuiService implements Listener, AutoCloseable {
     }
 
     public Optional<GuiSession> session(UUID playerId) {
-        SessionState state = sessions.get(playerId);
-        return state == null ? Optional.empty() : Optional.of(state.session());
+        return sessions.session(playerId);
     }
 
     public int activeSessions() { return sessions.size(); }
 
     /** Removes only active sessions/callback routes owned by the exact plugin instance. */
     public int purgeOwner(Plugin owner) {
-        if (owner == null) return 0;
-        AtomicLong removed = new AtomicLong();
-        sessions.forEach((playerId, state) -> {
-            if (state.owner() == owner && sessions.remove(playerId, state)) {
-                removed.incrementAndGet();
-                Player player = Bukkit.getPlayer(playerId);
-                if (player != null && player.getOpenInventory().getTopInventory().getHolder(false) instanceof CoreGuiHolder holder
-                        && holder.owner == owner) {
-                    player.closeInventory();
-                }
+        List<UUID> removed = sessions.purgeOwner(owner);
+        for (UUID playerId : removed) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.getOpenInventory().getTopInventory().getHolder(false) instanceof CoreGuiHolder holder
+                    && holder.owner == owner) {
+                player.closeInventory();
             }
-        });
-        return Math.toIntExact(removed.get());
+        }
+        return removed.size();
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -138,16 +132,11 @@ public final class GuiService implements Listener, AutoCloseable {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getInventory().getHolder(false) instanceof CoreGuiHolder holder)) return;
-        sessions.computeIfPresent(event.getPlayer().getUniqueId(), (id, current) ->
-                current.generation() == holder.generation && current.session().equals(holder.session) ? null : current);
+        sessions.removeIfCurrent(event.getPlayer().getUniqueId(), holder.session, holder.owner, holder.generation);
     }
 
     private boolean current(CoreGuiHolder holder, UUID playerId) {
-        SessionState current = sessions.get(playerId);
-        return current != null
-                && current.generation() == holder.generation
-                && current.session().equals(holder.session)
-                && current.owner() == holder.owner;
+        return sessions.current(playerId, holder.session, holder.owner, holder.generation);
     }
 
     public record GuiSession(UUID playerId, String moduleId, String guiId, int page, Instant openedAt) {}
@@ -158,8 +147,6 @@ public final class GuiService implements Listener, AutoCloseable {
             action = action == null ? ignored -> {} : action;
         }
     }
-
-    private record SessionState(GuiSession session, Plugin owner, long generation) {}
 
     public final class PaginatedGui<T> {
         private final Plugin owner;
@@ -245,7 +232,7 @@ public final class GuiService implements Listener, AutoCloseable {
             buttons.put(slot, new GuiButton(icon, click -> {
                 GuiSession expected = click.session();
                 Bukkit.getScheduler().runTask(corePlugin, () -> {
-                    SessionState current = sessions.get(click.player().getUniqueId());
+                    GuiSessionRegistry.Entry current = sessions.get(click.player().getUniqueId());
                     if (current == null || !current.session().equals(expected)) return;
                     if (current.owner() != null && !current.owner().isEnabled()) return;
                     safeAction.accept(click);
@@ -273,7 +260,7 @@ public final class GuiService implements Listener, AutoCloseable {
             holder.inventory = inventory;
             if (filler != null) for (int slot = 0; slot < size; slot++) inventory.setItem(slot, filler.clone());
             buttons.forEach((slot, button) -> inventory.setItem(slot, button.icon.clone()));
-            sessions.put(player.getUniqueId(), new SessionState(session, owner, generation));
+            sessions.put(player.getUniqueId(), session, owner, generation);
             player.openInventory(inventory);
             return inventory;
         }
