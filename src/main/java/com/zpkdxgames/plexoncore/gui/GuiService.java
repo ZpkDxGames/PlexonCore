@@ -6,6 +6,7 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -16,57 +17,117 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-public final class GuiService implements Listener {
-    private final Map<UUID, GuiSession> sessions = new ConcurrentHashMap<>();
+public final class GuiService implements Listener, AutoCloseable {
+    private static final Set<ClickType> ACTION_CLICKS = EnumSet.of(ClickType.LEFT, ClickType.RIGHT);
+
+    private final Plugin corePlugin;
+    private final Map<UUID, SessionState> sessions = new ConcurrentHashMap<>();
+    private final AtomicLong generations = new AtomicLong();
 
     public GuiService(Plugin plugin) {
-        Bukkit.getPluginManager().registerEvents(this, Objects.requireNonNull(plugin));
+        this.corePlugin = Objects.requireNonNull(plugin);
+        Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
+    /** Legacy API 2.0 ownerless builder. New integrations should use the owner-aware overload. */
     public GuiBuilder builder(String moduleId, String guiId, Component title, int rows) {
-        return new GuiBuilder(moduleId, guiId, title, rows);
+        return new GuiBuilder(null, moduleId, guiId, title, rows);
+    }
+
+    /** API 2.1 owner-aware builder. */
+    public GuiBuilder builder(Plugin owner, String moduleId, String guiId, Component title, int rows) {
+        Objects.requireNonNull(owner, "owner");
+        if (!owner.isEnabled()) throw new IllegalStateException("Cannot open GUI for disabled plugin " + owner.getName());
+        return new GuiBuilder(owner, moduleId, guiId, title, rows);
     }
 
     public <T> PaginatedGui<T> paginated(String moduleId, String guiId, Component title, int rows,
                                           List<T> entries, Function<T, ItemStack> icon,
                                           BiConsumer<GuiClick, T> action) {
-        return new PaginatedGui<>(moduleId, guiId, title, rows, entries, icon, action);
+        return new PaginatedGui<>(null, moduleId, guiId, title, rows, entries, icon, action);
+    }
+
+    public <T> PaginatedGui<T> paginated(Plugin owner, String moduleId, String guiId, Component title, int rows,
+                                          List<T> entries, Function<T, ItemStack> icon,
+                                          BiConsumer<GuiClick, T> action) {
+        Objects.requireNonNull(owner, "owner");
+        return new PaginatedGui<>(owner, moduleId, guiId, title, rows, entries, icon, action);
     }
 
     public Inventory confirmation(Player player, String moduleId, String guiId, Component title,
                                   ItemStack subject, Consumer<Player> confirm, Consumer<Player> cancel) {
+        return confirmation(null, player, moduleId, guiId, title, subject, confirm, cancel);
+    }
+
+    public Inventory confirmation(Plugin owner, Player player, String moduleId, String guiId, Component title,
+                                  ItemStack subject, Consumer<Player> confirm, Consumer<Player> cancel) {
         Objects.requireNonNull(player, "player");
         Consumer<Player> safeConfirm = confirm == null ? ignored -> {} : confirm;
         Consumer<Player> safeCancel = cancel == null ? Player::closeInventory : cancel;
-        GuiBuilder builder = builder(moduleId, guiId, title, 3).filler(Material.GRAY_STAINED_GLASS_PANE);
+        GuiBuilder builder = owner == null ? builder(moduleId, guiId, title, 3) : builder(owner, moduleId, guiId, title, 3);
+        builder.filler(Material.GRAY_STAINED_GLASS_PANE);
         if (subject != null) builder.button(13, subject, click -> {});
         builder.button(11, controlItem(Material.LIME_CONCRETE, Component.text("Confirm")), click -> safeConfirm.accept(click.player()));
         builder.button(15, controlItem(Material.RED_CONCRETE, Component.text("Cancel")), click -> safeCancel.accept(click.player()));
         return builder.open(player);
     }
 
-    public Optional<GuiSession> session(UUID playerId) { return Optional.ofNullable(sessions.get(playerId)); }
+    public Optional<GuiSession> session(UUID playerId) {
+        SessionState state = sessions.get(playerId);
+        return state == null ? Optional.empty() : Optional.of(state.session());
+    }
+
     public int activeSessions() { return sessions.size(); }
+
+    /** Removes only active sessions/callback routes owned by the exact plugin instance. */
+    public int purgeOwner(Plugin owner) {
+        if (owner == null) return 0;
+        AtomicLong removed = new AtomicLong();
+        sessions.forEach((playerId, state) -> {
+            if (state.owner() == owner && sessions.remove(playerId, state)) {
+                removed.incrementAndGet();
+                Player player = Bukkit.getPlayer(playerId);
+                if (player != null && player.getOpenInventory().getTopInventory().getHolder(false) instanceof CoreGuiHolder holder
+                        && holder.owner == owner) {
+                    player.closeInventory();
+                }
+            }
+        });
+        return Math.toIntExact(removed.get());
+    }
 
     @EventHandler(ignoreCancelled = true)
     public void onClick(InventoryClickEvent event) {
         if (!(event.getView().getTopInventory().getHolder(false) instanceof CoreGuiHolder holder)) return;
         event.setCancelled(true);
         if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (!ACTION_CLICKS.contains(event.getClick())) return;
         if (event.getRawSlot() < 0 || event.getRawSlot() >= event.getView().getTopInventory().getSize()) return;
+        if (!current(holder, player.getUniqueId())) return;
+        if (holder.owner != null && !holder.owner.isEnabled()) {
+            sessions.remove(player.getUniqueId());
+            player.closeInventory();
+            return;
+        }
         GuiButton button = holder.buttons.get(event.getRawSlot());
-        if (button != null) button.action.accept(new GuiClick(player, event, holder.session));
+        if (button == null) return;
+        // Revalidation immediately precedes mutation. A stale holder never becomes authoritative.
+        if (!current(holder, player.getUniqueId())) return;
+        button.action.accept(new GuiClick(player, event, holder.session));
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -77,7 +138,16 @@ public final class GuiService implements Listener {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         if (!(event.getInventory().getHolder(false) instanceof CoreGuiHolder holder)) return;
-        sessions.computeIfPresent(event.getPlayer().getUniqueId(), (id, current) -> current.equals(holder.session) ? null : current);
+        sessions.computeIfPresent(event.getPlayer().getUniqueId(), (id, current) ->
+                current.generation() == holder.generation && current.session().equals(holder.session) ? null : current);
+    }
+
+    private boolean current(CoreGuiHolder holder, UUID playerId) {
+        SessionState current = sessions.get(playerId);
+        return current != null
+                && current.generation() == holder.generation
+                && current.session().equals(holder.session)
+                && current.owner() == holder.owner;
     }
 
     public record GuiSession(UUID playerId, String moduleId, String guiId, int page, Instant openedAt) {}
@@ -89,7 +159,10 @@ public final class GuiService implements Listener {
         }
     }
 
+    private record SessionState(GuiSession session, Plugin owner, long generation) {}
+
     public final class PaginatedGui<T> {
+        private final Plugin owner;
         private final String moduleId;
         private final String guiId;
         private final Component title;
@@ -98,9 +171,10 @@ public final class GuiService implements Listener {
         private final Function<T, ItemStack> icon;
         private final BiConsumer<GuiClick, T> action;
 
-        private PaginatedGui(String moduleId, String guiId, Component title, int rows, List<T> entries,
+        private PaginatedGui(Plugin owner, String moduleId, String guiId, Component title, int rows, List<T> entries,
                              Function<T, ItemStack> icon, BiConsumer<GuiClick, T> action) {
             if (rows < 2 || rows > 6) throw new IllegalArgumentException("Paginated GUI rows must be 2..6");
+            this.owner = owner;
             this.moduleId = requireId(moduleId, "moduleId");
             this.guiId = requireId(guiId, "guiId");
             this.title = title == null ? Component.text("Plexon") : title;
@@ -118,7 +192,10 @@ public final class GuiService implements Listener {
             int start = page * pageSize();
             int end = Math.min(entries.size(), start + pageSize());
             int size = rows * 9;
-            GuiBuilder builder = builder(moduleId, guiId, title, rows).page(page).filler(Material.GRAY_STAINED_GLASS_PANE);
+            GuiBuilder builder = owner == null
+                    ? GuiService.this.builder(moduleId, guiId, title, rows)
+                    : GuiService.this.builder(owner, moduleId, guiId, title, rows);
+            builder.page(page).filler(Material.GRAY_STAINED_GLASS_PANE);
             for (int index = start; index < end; index++) {
                 T entry = entries.get(index);
                 int slot = index - start;
@@ -136,6 +213,7 @@ public final class GuiService implements Listener {
     }
 
     public final class GuiBuilder {
+        private final Plugin owner;
         private final String moduleId;
         private final String guiId;
         private final Component title;
@@ -144,8 +222,9 @@ public final class GuiService implements Listener {
         private ItemStack filler;
         private int page;
 
-        private GuiBuilder(String moduleId, String guiId, Component title, int rows) {
+        private GuiBuilder(Plugin owner, String moduleId, String guiId, Component title, int rows) {
             if (rows < 1 || rows > 6) throw new IllegalArgumentException("GUI rows must be 1..6");
+            this.owner = owner;
             this.moduleId = requireId(moduleId, "moduleId");
             this.guiId = requireId(guiId, "guiId");
             this.title = title == null ? Component.text("Plexon") : title;
@@ -158,6 +237,23 @@ public final class GuiService implements Listener {
             buttons.put(slot, new GuiButton(icon, action));
             return this;
         }
+
+        /** Defers a semantic action by one tick and revalidates owner/session before execution. */
+        public GuiBuilder buttonDeferred(int slot, ItemStack icon, Consumer<GuiClick> action) {
+            validateSlot(slot);
+            Consumer<GuiClick> safeAction = action == null ? ignored -> {} : action;
+            buttons.put(slot, new GuiButton(icon, click -> {
+                GuiSession expected = click.session();
+                Bukkit.getScheduler().runTask(corePlugin, () -> {
+                    SessionState current = sessions.get(click.player().getUniqueId());
+                    if (current == null || !current.session().equals(expected)) return;
+                    if (current.owner() != null && !current.owner().isEnabled()) return;
+                    safeAction.accept(click);
+                });
+            }));
+            return this;
+        }
+
         public GuiBuilder filler(ItemStack filler) { this.filler = filler == null ? null : filler.clone(); return this; }
         public GuiBuilder filler(Material material) {
             ItemStack item = new ItemStack(material == null ? Material.GRAY_STAINED_GLASS_PANE : material);
@@ -169,13 +265,15 @@ public final class GuiService implements Listener {
 
         public Inventory open(Player player) {
             Objects.requireNonNull(player, "player");
+            if (owner != null && !owner.isEnabled()) throw new IllegalStateException("Cannot open GUI for disabled plugin " + owner.getName());
             GuiSession session = new GuiSession(player.getUniqueId(), moduleId, guiId, page, Instant.now());
-            CoreGuiHolder holder = new CoreGuiHolder(session, Map.copyOf(buttons));
+            long generation = generations.incrementAndGet();
+            CoreGuiHolder holder = new CoreGuiHolder(session, owner, generation, Map.copyOf(buttons));
             Inventory inventory = Bukkit.createInventory(holder, size, title);
             holder.inventory = inventory;
             if (filler != null) for (int slot = 0; slot < size; slot++) inventory.setItem(slot, filler.clone());
             buttons.forEach((slot, button) -> inventory.setItem(slot, button.icon.clone()));
-            sessions.put(player.getUniqueId(), session);
+            sessions.put(player.getUniqueId(), new SessionState(session, owner, generation));
             player.openInventory(inventory);
             return inventory;
         }
@@ -199,11 +297,23 @@ public final class GuiService implements Listener {
         return id;
     }
 
+    @Override
+    public void close() {
+        sessions.clear();
+    }
+
     private static final class CoreGuiHolder implements InventoryHolder {
         private final GuiSession session;
+        private final Plugin owner;
+        private final long generation;
         private final Map<Integer, GuiButton> buttons;
         private Inventory inventory;
-        private CoreGuiHolder(GuiSession session, Map<Integer, GuiButton> buttons) { this.session = session; this.buttons = buttons; }
+        private CoreGuiHolder(GuiSession session, Plugin owner, long generation, Map<Integer, GuiButton> buttons) {
+            this.session = session;
+            this.owner = owner;
+            this.generation = generation;
+            this.buttons = buttons;
+        }
         @Override public Inventory getInventory() { return inventory; }
     }
 }
