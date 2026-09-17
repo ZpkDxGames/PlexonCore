@@ -2,9 +2,9 @@
 
 ## Release state
 
-`RC SOURCE + CI + DOWNSTREAM CERTIFIED — LIVE RUNTIME CERTIFICATION PENDING`
+`RUNTIME CANDIDATE`
 
-Stable `2.1.0` publication remains blocked. The exact `2.1.0-rc.1` binary recorded below must still pass the production PlexonCraft runtime gate and the required soak before `main`, `release/stable`, the stable tag, or the stable GitHub Release may advance.
+Source, Core CI, distribution, and downstream compatibility gates are complete for `2.1.0-rc.1`. Stable `2.1.0` publication remains blocked until the exact candidate binary passes live PlexonCraft runtime certification and the required soak.
 
 ## Verified baseline
 
@@ -20,7 +20,6 @@ Stable `2.1.0` publication remains blocked. The exact `2.1.0-rc.1` binary record
 - Java target: `25` / class major `69`
 - Baseline API: `2.0`, retaining the `1.0` compatibility bridge
 - RC API: additive `2.1`, retaining API 2.0 surface and the API 1.0 compatibility bridge
-- Open pull requests at reconnaissance: none
 - `main` protection at reconnaissance and at RC closure: disabled
 
 ## Baseline verification
@@ -39,29 +38,27 @@ The unmodified baseline was verified by GitHub Actions run `34632587636` at the 
 
 ## RC implementation closure
 
-The hardening work is implemented on `agent/2.1.0-full-stable-hardening`.
+Completed source/runtime areas:
 
-Completed runtime/source areas:
+1. Event gateway failure isolation and owner lifecycle
+2. Player-watch transition correctness and owner lifecycle
+3. Block-origin coalesced persistence and writer lifecycle
+4. SQLite writer lifecycle, transaction rollback/recovery, and future-schema refusal
+5. Scheduler observability, owner lifecycle, cancellation, repeating work, and bounded shutdown
+6. Contributor-based Core health aggregation
+7. Capability-aware integration registry
+8. GUI stale-session rejection, permission-safe routing, and owner lifecycle
+9. Cached PlaceholderAPI adapter lifecycle
+10. Deterministic item identity/fingerprint behavior
+11. Bounded near-O(1) event dedupe
+12. Immutable configuration generations with validation and restart-required semantics
+13. Additive Core API 2.1 contract
+14. Cross-repository compatibility matrix
+15. Expanded regression tests
 
-1. **Event gateway** — corrected failure-log rate-limit timestamp semantics, isolated subscriber failures, owner-aware subscriptions, exact-owner cleanup, and disabled-owner fail-closed delivery.
-2. **Player watch** — owner-aware registrations and cleanup plus coherent world-transition source metadata; when Bukkit cannot supply source coordinates Core records them as unknown instead of mixing the old world with destination coordinates.
-3. **Block origin persistence** — in-memory authority preserved, last-write-wins coalescing buffer, batched/pressure flushes, retry visibility, bounded shutdown, and persistence-health telemetry.
-4. **SQLite lifecycle** — one ordered lifecycle-owned writer connection per normalized DB path, database authority reuse, transaction rollback/recovery, future-schema refusal, and bounded close.
-5. **Scheduler** — owner-scoped async/scheduled work, observable completion/failure, owner purge, repeating-task ownership, bounded shutdown, and contributor health. A regression test exposed a health-publication race; the returned future now becomes complete only after scheduler bookkeeping and health publication are committed.
-6. **Health** — independent contributor-based Core health aggregation rather than one mutable status bit.
-7. **Integrations** — capability/state dimensions refreshed on plugin lifecycle; active `PlexonGPFlags` identity retained and retired `PlexonCrates` is not treated as an active first-party dependency.
-8. **GUI** — owner-aware session authority, exact-generation stale-session rejection, owner purge, safe click filtering, deferred-action revalidation, and immutable per-open callback routing.
-9. **PlaceholderAPI bridge** — reflective method discovery moved out of rendering hot paths into a cached lifecycle adapter with explicit invalidation/refresh and failure observations.
-10. **Item identity** — deterministic custom-ID conflict handling and stable fingerprint behavior.
-11. **Event dedupe** — bounded expiry-driven memory dedupe without whole-map hot-path scans.
-12. **Configuration** — pure validation policy, immutable generation publication, deprecated-key tolerance, explicit restart-required runtime sizing, and future-schema refusal.
-13. **API** — additive API 2.1 exposure without removing the API 2.0 surface or API 1.0 compatibility bridge.
-
-No PlexonPanel code was changed. No PlexonCrates revival was performed. Downstream repositories were compiled/tested but not modified.
+No PlexonPanel code was changed. PlexonCrates was not revived. Downstream repositories were compiled/tested but not modified.
 
 ## Exact RC evidence
-
-The runtime candidate code and compatibility harness are pinned at:
 
 - Certified candidate source SHA: `b259f6116ab26831ab250e0b61335908b87e71fa`
 - Candidate version: `2.1.0-rc.1`
@@ -72,37 +69,33 @@ The runtime candidate code and compatibility harness are pinned at:
 - Artifact ZIP SHA-256: `8cd61477bf8745d87146564dbd975d93b8517e3988ce107476f08b9badcea279`
 - Core Build run: `35270431101` — **SUCCESS**
 - Downstream Compatibility run: `35270431237` — **SUCCESS**
+- Evidence-sealing documentation commit: `a412d22e855b700badc08064caa1943f11f7e0fd`
 
-The JAR checksum above was verified both by CI's generated `SHA256SUMS.txt` and by an independent checksum of the downloaded Actions artifact.
+The candidate JAR checksum was verified both by CI's generated `SHA256SUMS.txt` and independently from the downloaded Actions artifact.
 
-Evidence-only documentation commits after `b259f6116ab26831ab250e0b61335908b87e71fa` do not alter the certified runtime source. If production code, resources, or `pom.xml` change after this point, the RC binary and all source/runtime gates must be regenerated from a new candidate SHA.
+Documentation-only commits after the certified candidate do not alter the candidate runtime bytes. Any production source, resource, dependency, build configuration, or `pom.xml` change requires a new candidate and regeneration of all applicable gates.
 
 ## Core CI gate
 
-Exact-head Build run `35270431101` passed at candidate SHA `b259f6116ab26831ab250e0b61335908b87e71fa`.
+Exact-candidate Build run `35270431101` passed at `b259f6116ab26831ab250e0b61335908b87e71fa`.
 
-- Production Java sources compiled: **27**
-- Test Java sources compiled: **27**
+- Production Java sources: **27**
+- Test Java sources: **27**
 - Tests: **66 run / 0 failures / 0 errors / 0 skipped**
 - Maven build: PASS
 - Distribution contract: PASS
-- `plugin.yml` present and embedded version = `2.1.0-rc.1`: PASS
-- PlexonCore main class present: PASS
-- BlockOrigin runtime class present: PASS
+- `plugin.yml` and embedded `2.1.0-rc.1` version: PASS
+- Core main class and BlockOrigin runtime class: PASS
 - SQLite JDBC shaded: PASS
 - Bukkit/Paper/Adventure server APIs excluded from shading: PASS
 - Java class major `69`: PASS
 - Paper pin `26.2.build.121-stable`: PASS
-- generated JAR SHA-256 verification: PASS
+- generated JAR checksum verification: PASS
 - `git diff --check`: PASS
-
-Regression coverage includes event failure rate limiting, owner-scoped event routing, player transition/lifecycle semantics, BlockOrigin coalescing, bounded dedupe, integration state, config policy, scheduler observability/cleanup/shutdown, GUI session generations/owner cleanup, PlaceholderAPI provider lifecycle, SQLite writer lifecycle/migration/recovery, health aggregation, API compatibility, and item identity.
 
 ## Downstream compatibility gate
 
-Downstream Compatibility run `35270431237` completed **SUCCESS** at the exact candidate SHA.
-
-The matrix built/tested the production set without committing or patching downstream repositories:
+Downstream Compatibility run `35270431237` completed **SUCCESS** for all 14 production-set repositories:
 
 - PlexonUtility
 - PlexonSpawners
@@ -119,76 +112,73 @@ The matrix built/tested the production set without committing or patching downst
 - PlexonBackpacks
 - PlexonGPFlags
 
-Result: **14/14 matrix jobs completed successfully.**
+The exact RC bytes were supplied under each consumer's existing Maven/file-based dependency shape only inside ephemeral CI workspaces. Each repository ran its own build/tests unchanged, and the harness verified that compatibility work introduced no additional tracked-file mutation.
 
-Compatibility method:
+## Runtime certification gate
 
-- The exact RC JAR bytes were installed into the CI runner under historical Maven Core coordinates used by downstream repositories.
-- File-based Gradle consumers received the exact RC bytes only in their ephemeral `libs/PlexonCore-*.jar` path.
-- Each downstream repository ran its own test build unchanged.
-- Checkout-time tracked differences were captured as the baseline, and the compatibility build was required not to add any tracked-file mutation.
+The repository now contains the exact-candidate checklist:
 
-Harness issues encountered and resolved during certification were not product regressions:
+`docs/release/PLEXONCORE_2.1.0_RUNTIME_CERTIFICATION.md`
 
-- PlexonUtility's first compatibility run passed its 145 tests but the harness initially mistook untracked Maven `target/` output for a repository mutation.
-- PlexonSkills expects `libs/PlexonCore-2.0.4.jar`; the corrected harness injected the exact RC JAR into that ephemeral path, after which its Gradle compile/test completed successfully.
-- PlexonShops had checkout-time `gradlew.bat` line-ending normalization; the corrected harness preserved the checkout state as the integrity baseline, after which its Gradle compile/test completed successfully.
+Required live gates include:
 
-## Runtime gates still required
+- Paper 26.2 / Java 25 identity
+- exact candidate SHA-256 verification
+- upgrade from the current 2.0.5 data set
+- clean startup/service registration
+- API 2.1 / 2.0 / 1.0 bridge validation
+- integration discovery/capability validation
+- owner disable/re-enable cleanup
+- player transition checks
+- event failure isolation
+- GUI stale-session/permission/lifecycle checks
+- PlaceholderAPI lifecycle
+- block-origin rapid mutation/restart/retry/shutdown behavior
+- SQLite migration/restart/transaction behavior
+- scheduler failure/recovery/cancellation/repeating/shutdown behavior
+- production custom-item identity
+- diagnostics/health correctness
+- at least **30 minutes** of Spark/task/thread/heap/queue observation
+- clean shutdown/restart
+- no unresolved HIGH or CRITICAL defect
 
-Stable publication is blocked until **the exact JAR SHA-256 recorded above** is tested on the real PlexonCraft runtime with:
+Current runtime status:
 
-- Paper 26.2
-- Java 25
-- upgrade from current 2.0.5 data
-- clean Core startup and service registration
-- API 2.1 / API 2.0 / API 1.0 bridge checks
-- active integration discovery/capability checks
-- owner lifecycle disable/re-enable checks
-- player movement/world-change/teleport/disconnect checks
-- block-origin rapid mutation, restart, persistence failure/retry, and shutdown-flush checks
-- scheduler failure/recovery, cancellation, repeating-task, owner-cleanup, and shutdown checks
-- GUI permission, stale-session, and lifecycle checks
-- PlaceholderAPI disable/re-enable/provider-failure checks
-- exact item-identity behavior for production custom items
-- at least **30 minutes** of Spark/task/thread/heap/origin-queue observation
-- no unresolved HIGH or CRITICAL defects
+- Exact-candidate deployment: **PENDING**
+- Functional runtime checklist: **PENDING**
+- 30-minute soak: **PENDING**
+- Spark/performance evidence: **PENDING**
+- Runtime defect classification: **PENDING**
 
-Current runtime gate status:
-
-- Live PlexonCraft host connection: **UNAVAILABLE during this source/CI session**
-- Exact-candidate runtime certification: **PENDING**
-- 30-minute production-like soak: **PENDING**
-- Spark/performance runtime result: **PENDING**
-- Runtime-discovered HIGH/CRITICAL defects: **UNKNOWN until certification**
-
-These gates must not be simulated or inferred from CI.
+These gates must not be inferred from CI.
 
 ## Release engineering / governance state
 
 - POM remains `2.1.0-rc.1`.
+- Stable release-note draft is prepared at `.release/2.1.0.md`.
 - No stable `v2.1.0` tag exists.
 - No stable GitHub Release has been published.
-- `main` remains at the accepted `v2.0.5` baseline until the runtime gate is closed.
-- `release/stable` remains at the accepted `v2.0.5` baseline until the runtime gate is closed.
-- Existing stable release workflow still requires stable-version semantics and exact `main`/`release/stable` SHA parity before publication.
-- `main` is currently unprotected. Branch protection / required checks should be enabled before or as part of stable closure, but the current GitHub App connection does not expose repository-administration mutation needed to enforce that setting from this execution session.
+- `main` remains at the accepted `v2.0.5` baseline.
+- `release/stable` remains at the accepted `v2.0.5` baseline.
+- The stable release workflow runs only on `release/stable`, refuses prerelease version strings, requires exact `main`/`release/stable` SHA parity, requires `.release/<version>.md`, reruns build/distribution verification, and publishes the final JAR plus `SHA256SUMS.txt`.
+- `main` remains unprotected. Branch-protection enforcement requires repository-administration capability not exposed by the current connected GitHub App.
 
 ## Stable closure sequence after runtime PASS
 
-Only after the exact RC binary passes runtime certification and soak:
-
-1. Record live-server evidence and performance/soak results in this ledger.
-2. Confirm no production source/resource/POM change occurred after the certified RC. If any did, cut a new RC and repeat all gates.
-3. Change project version from `2.1.0-rc.1` to `2.1.0` without altering certified runtime behavior.
-4. Finalize `.release/2.1.0.md` from the prepared release notes.
-5. Run the complete Core Build and Downstream Compatibility gates again for the stable-version commit.
-6. Merge/advance `main` only with green checks.
-7. Advance `release/stable` to the exact verified `main` commit so the stable release workflow can publish `v2.1.0`.
-8. Verify published JAR, SHA-256, tag/source provenance, and rollback path.
-9. Retain `v2.0.5` and its known-good JAR as the rollback baseline.
+1. Record runtime evidence in this ledger.
+2. Confirm the runtime-tested candidate bytes/source remain unchanged.
+3. If any runtime code/build change is required, cut a new RC and repeat affected gates.
+4. Change version from `2.1.0-rc.1` to `2.1.0` without changing certified runtime behavior.
+5. Finalize `.release/2.1.0.md` if runtime findings require documentation.
+6. Run complete Core Build and Downstream Compatibility gates at the stable-version commit.
+7. Merge/advance `main` only with green checks.
+8. Advance `release/stable` to the exact verified `main` SHA.
+9. Verify the published `v2.1.0` tag, JAR, SHA-256, source provenance, and rollback path.
+10. Retain `v2.0.5` and its known-good JAR as the rollback baseline.
 
 ## Current decision
+
+**State: RUNTIME CANDIDATE.**
 
 **Source/CI/downstream gate: PASS.**
 
