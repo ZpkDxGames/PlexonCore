@@ -6,7 +6,6 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -55,27 +54,21 @@ public final class CoreScheduler implements AutoCloseable {
             return thread;
         };
         return new ThreadPoolExecutor(threads, threads, 30, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(capacity), factory, new ThreadPoolExecutor.AbortPolicy());
+                new LinkedBlockingQueue<>(capacity), factory, new ThreadPoolExecutor.AbortPolicy());
     }
 
     public void runPrimary(Runnable task) {
         Objects.requireNonNull(task, "task");
-        if (Bukkit.isPrimaryThread()) {
-            runObserved("primary", null, task);
-        } else {
-            Bukkit.getScheduler().runTask(plugin, () -> runObserved("primary", null, task));
-        }
+        if (Bukkit.isPrimaryThread()) runObserved("primary", null, task);
+        else Bukkit.getScheduler().runTask(plugin, () -> runObserved("primary", null, task));
     }
 
     public void runPrimary(Plugin owner, Runnable task) {
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(task, "task");
         if (!owner.isEnabled()) return;
-        if (Bukkit.isPrimaryThread()) {
-            runObserved("primary", owner, task);
-        } else {
-            Bukkit.getScheduler().runTask(plugin, () -> runObserved("primary", owner, task));
-        }
+        if (Bukkit.isPrimaryThread()) runObserved("primary", owner, task);
+        else Bukkit.getScheduler().runTask(plugin, () -> runObserved("primary", owner, task));
     }
 
     public CompletableFuture<Void> runAsync(Runnable task) {
@@ -204,7 +197,8 @@ public final class CoreScheduler implements AutoCloseable {
                 return;
             }
             if (async) {
-                runAsync(owner, task).whenComplete((ignored, error) -> complete(completion, error));
+                CompletableFuture<Void> future = owner == null ? runAsync(task) : runAsync(owner, task);
+                future.whenComplete((ignored, error) -> complete(completion, error));
             } else {
                 try {
                     runObserved("scheduled-primary", owner, task);
@@ -225,11 +219,10 @@ public final class CoreScheduler implements AutoCloseable {
         return new ObservedTaskHandle(handle, completion);
     }
 
-    /**
-     * Repeating async trigger for shared pooled work. Each execution is independently observed by
-     * runAsync; cancelling the handle prevents future triggers.
-     */
+    /** Repeating pooled trigger. Each async execution has its own observed completion path. */
     public TaskHandle scheduleRepeatingAsync(Plugin owner, Duration initialDelay, Duration period, Runnable task) {
+        Objects.requireNonNull(initialDelay, "initialDelay");
+        Objects.requireNonNull(period, "period");
         Objects.requireNonNull(task, "task");
         if (closed.get()) throw new IllegalStateException("CoreScheduler is closed");
         if (owner != null && !owner.isEnabled()) throw new IllegalStateException("Task owner is disabled: " + owner.getName());
@@ -240,7 +233,8 @@ public final class CoreScheduler implements AutoCloseable {
                 if (handle != null) handle.cancel();
                 return;
             }
-            runAsync(owner, task);
+            if (owner == null) runAsync(task);
+            else runAsync(owner, task);
         }, delayTicks(initialDelay), Math.max(1L, delayTicks(period)));
         TaskHandle handle = new TaskHandle(() -> {
             bukkitTask.cancel();
@@ -300,12 +294,11 @@ public final class CoreScheduler implements AutoCloseable {
         failedTasks.increment();
         Throwable root = unwrap(error);
         lastFailure.set(new FailureRecord(lane, root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage(), Instant.now()));
-        plugin.getLogger().warning("Core scheduler task failure [" + lane + "]: " + root.getClass().getSimpleName() + ": " + root.getMessage());
+        java.util.logging.Logger logger = plugin.getLogger();
+        if (logger != null) logger.warning("Core scheduler task failure [" + lane + "]: " + root.getClass().getSimpleName() + ": " + root.getMessage());
     }
 
-    private void markSuccess() {
-        lastSuccessfulTask.set(Instant.now());
-    }
+    private void markSuccess() { lastSuccessfulTask.set(Instant.now()); }
 
     private static void complete(CompletableFuture<Void> target, Throwable error) {
         if (error == null) target.complete(null);
