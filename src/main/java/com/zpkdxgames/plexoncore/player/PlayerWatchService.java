@@ -18,6 +18,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.Plugin;
 
 /**
  * Shared, opt-in player activity gateway for Plexon modules.
@@ -27,8 +28,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
  * the same main-thread event context as the underlying Bukkit event. The hot path performs one UUID
  * map lookup and returns immediately when a player has no watches.</p>
  *
- * <p>Subscriber failures are isolated. One module throwing from a watch callback cannot prevent
- * other watches from receiving the same signal or prevent terminal watch cleanup.</p>
+ * <p>API 2.1 adds owner-aware registrations. Legacy ownerless registrations are retained for binary
+ * and source compatibility but cannot be automatically attributed to a disabling plugin.</p>
  */
 public final class PlayerWatchService implements Listener, AutoCloseable {
     public enum WatchType {
@@ -48,6 +49,10 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
     }
 
     public record Position(UUID worldId, double x, double y, double z) {
+        public Position {
+            Objects.requireNonNull(worldId, "worldId");
+        }
+
         public static Position from(Location location) {
             if (location == null || location.getWorld() == null) return null;
             return new Position(location.getWorld().getUID(), location.getX(), location.getY(), location.getZ());
@@ -61,6 +66,15 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
             Position to,
             double finalDamage,
             long observedAtNanos) {}
+
+    /** Additive API 2.1 view for callers that want explicit transition completeness. */
+    public record WorldTransition(Position before, Position after, boolean complete) {
+        public static WorldTransition from(PlayerActivity activity) {
+            Objects.requireNonNull(activity, "activity");
+            return new WorldTransition(activity.from(), activity.to(), activity.from() != null && activity.to() != null
+                    && Double.isFinite(activity.from().x()) && Double.isFinite(activity.from().y()) && Double.isFinite(activity.from().z()));
+        }
+    }
 
     @FunctionalInterface
     public interface WatchListener {
@@ -76,9 +90,13 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
 
     public record WatchStats(int watchedPlayers, int registrations) {}
 
-    private record Registration(long id, EnumSet<WatchType> types, WatchListener listener) {}
+    private record Registration(long id, Plugin owner, EnumSet<WatchType> types, WatchListener listener) {
+        boolean ownerEnabled() { return owner == null || owner.isEnabled(); }
+    }
 
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<Long, Registration>> watches = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Position> lastPositions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, WorldTransition> pendingWorldTransitions = new ConcurrentHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final BiConsumer<Long, Throwable> failureHandler;
@@ -91,7 +109,19 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
         this.failureHandler = Objects.requireNonNull(failureHandler, "failureHandler");
     }
 
+    /** Legacy API 2.0 registration. Prefer the owner-aware overload for new code. */
     public WatchHandle watch(UUID playerId, Set<WatchType> types, WatchListener listener) {
+        return watchInternal(null, playerId, types, listener);
+    }
+
+    /** API 2.1 owner-aware registration. */
+    public WatchHandle watch(Plugin owner, UUID playerId, Set<WatchType> types, WatchListener listener) {
+        Objects.requireNonNull(owner, "owner");
+        if (!owner.isEnabled()) throw new IllegalStateException("Cannot register player watch for disabled plugin " + owner.getName());
+        return watchInternal(owner, playerId, types, listener);
+    }
+
+    private WatchHandle watchInternal(Plugin owner, UUID playerId, Set<WatchType> types, WatchListener listener) {
         Objects.requireNonNull(playerId, "playerId");
         Objects.requireNonNull(types, "types");
         Objects.requireNonNull(listener, "listener");
@@ -101,8 +131,21 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
         EnumSet<WatchType> copy = EnumSet.copyOf(types);
         long id = sequence.incrementAndGet();
         watches.computeIfAbsent(playerId, ignored -> new ConcurrentHashMap<>())
-                .put(id, new Registration(id, copy, listener));
+                .put(id, new Registration(id, owner, copy, listener));
         return new Handle(playerId, id);
+    }
+
+    /** Removes only registrations owned by the exact plugin instance. */
+    public int purgeOwner(Plugin owner) {
+        if (owner == null) return 0;
+        AtomicLong removed = new AtomicLong();
+        watches.forEach((playerId, registrations) -> {
+            registrations.forEach((id, registration) -> {
+                if (registration.owner() == owner && registrations.remove(id, registration)) removed.incrementAndGet();
+            });
+            if (registrations.isEmpty() && watches.remove(playerId, registrations)) clearPositionState(playerId);
+        });
+        return Math.toIntExact(removed.get());
     }
 
     public boolean hasWatches(UUID playerId) {
@@ -119,14 +162,21 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
-        var registrations = watches.get(player.getUniqueId());
-        if (registrations == null || registrations.isEmpty() || !contains(registrations, WatchType.MOVEMENT)) return;
+        UUID playerId = player.getUniqueId();
+        var registrations = watches.get(playerId);
+        if (registrations == null || registrations.isEmpty()) return;
 
         Location from = event.getFrom();
         Location to = event.getTo();
         if (to == null || samePosition(from, to)) return;
-        dispatch(registrations, WatchType.MOVEMENT, new PlayerActivity(
-                player.getUniqueId(), Signal.MOVED, Position.from(from), Position.from(to), 0.0D, System.nanoTime()));
+        Position before = Position.from(from);
+        Position after = Position.from(to);
+        observeMovement(playerId, before, after);
+
+        if (contains(registrations, WatchType.MOVEMENT)) {
+            dispatch(registrations, WatchType.MOVEMENT, new PlayerActivity(
+                    playerId, Signal.MOVED, before, after, 0.0D, System.nanoTime()));
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -134,8 +184,10 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
         if (!(event.getEntity() instanceof Player player)) return;
         var registrations = watches.get(player.getUniqueId());
         if (registrations == null || registrations.isEmpty() || !contains(registrations, WatchType.DAMAGE)) return;
+        Position current = Position.from(player.getLocation());
+        if (current != null) lastPositions.put(player.getUniqueId(), current);
         dispatch(registrations, WatchType.DAMAGE, new PlayerActivity(
-                player.getUniqueId(), Signal.DAMAGED, Position.from(player.getLocation()), null,
+                player.getUniqueId(), Signal.DAMAGED, current, null,
                 event.getFinalDamage(), System.nanoTime()));
     }
 
@@ -147,11 +199,12 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onWorldChange(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
-        var registrations = watches.get(player.getUniqueId());
+        UUID playerId = player.getUniqueId();
+        var registrations = watches.get(playerId);
         if (registrations == null || registrations.isEmpty() || !contains(registrations, WatchType.WORLD_CHANGE)) return;
-        Position from = new Position(event.getFrom().getUID(), player.getX(), player.getY(), player.getZ());
-        dispatch(registrations, WatchType.WORLD_CHANGE, new PlayerActivity(
-                player.getUniqueId(), Signal.WORLD_CHANGED, from, Position.from(player.getLocation()), 0.0D, System.nanoTime()));
+        Position current = Position.from(player.getLocation());
+        PlayerActivity activity = worldChangeActivity(playerId, event.getFrom().getUID(), current);
+        dispatch(registrations, WatchType.WORLD_CHANGE, activity);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -159,22 +212,52 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
         dispatchAndClear(event.getEntity(), WatchType.DEATH, Signal.DIED);
     }
 
+    void observeMovement(UUID playerId, Position before, Position after) {
+        if (before != null && after != null && !before.worldId().equals(after.worldId())) {
+            pendingWorldTransitions.put(playerId, new WorldTransition(before, after, true));
+        }
+        if (after != null) lastPositions.put(playerId, after);
+    }
+
+    PlayerActivity worldChangeActivity(UUID playerId, UUID oldWorldId, Position current) {
+        WorldTransition observed = pendingWorldTransitions.remove(playerId);
+        Position before = null;
+        Position after = current;
+        if (observed != null && observed.before() != null && observed.before().worldId().equals(oldWorldId)) {
+            before = observed.before();
+            if (after == null) after = observed.after();
+        } else {
+            Position last = lastPositions.get(playerId);
+            if (last != null && last.worldId().equals(oldWorldId)) before = last;
+        }
+        if (before == null) {
+            // PlayerChangedWorldEvent exposes only the previous World, not its coordinates. Unknown
+            // coordinates are represented explicitly instead of combining an old world UUID with
+            // destination coordinates as older Core versions did.
+            before = new Position(oldWorldId, Double.NaN, Double.NaN, Double.NaN);
+        }
+        if (after != null) lastPositions.put(playerId, after);
+        return new PlayerActivity(playerId, Signal.WORLD_CHANGED, before, after, 0.0D, System.nanoTime());
+    }
+
     private void dispatchAndClear(Player player, WatchType type, Signal signal) {
-        var registrations = watches.get(player.getUniqueId());
+        UUID playerId = player.getUniqueId();
+        var registrations = watches.get(playerId);
         if (registrations == null || registrations.isEmpty()) return;
         try {
             if (contains(registrations, type)) {
                 dispatch(registrations, type, new PlayerActivity(
-                        player.getUniqueId(), signal, Position.from(player.getLocation()), null, 0.0D, System.nanoTime()));
+                        playerId, signal, Position.from(player.getLocation()), null, 0.0D, System.nanoTime()));
             }
         } finally {
-            watches.remove(player.getUniqueId(), registrations);
+            watches.remove(playerId, registrations);
+            clearPositionState(playerId);
         }
     }
 
     private static boolean contains(ConcurrentHashMap<Long, Registration> registrations, WatchType type) {
         for (Registration registration : registrations.values()) {
-            if (registration.types().contains(type)) return true;
+            if (registration.ownerEnabled() && registration.types().contains(type)) return true;
         }
         return false;
     }
@@ -185,7 +268,7 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
             PlayerActivity activity) {
         int delivered = 0;
         for (Registration registration : registrations.values()) {
-            if (!registration.types().contains(type)) continue;
+            if (!registration.ownerEnabled() || !registration.types().contains(type)) continue;
             try {
                 registration.listener().onActivity(activity);
                 delivered++;
@@ -220,9 +303,18 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
                 && Double.compare(from.getZ(), to.getZ()) == 0;
     }
 
+    private void clearPositionState(UUID playerId) {
+        lastPositions.remove(playerId);
+        pendingWorldTransitions.remove(playerId);
+    }
+
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true)) watches.clear();
+        if (closed.compareAndSet(false, true)) {
+            watches.clear();
+            lastPositions.clear();
+            pendingWorldTransitions.clear();
+        }
     }
 
     private final class Handle implements WatchHandle {
@@ -244,7 +336,11 @@ public final class PlayerWatchService implements Listener, AutoCloseable {
             if (!handleClosed.compareAndSet(false, true)) return;
             watches.computeIfPresent(playerId, (ignored, registrations) -> {
                 registrations.remove(id);
-                return registrations.isEmpty() ? null : registrations;
+                if (registrations.isEmpty()) {
+                    clearPositionState(playerId);
+                    return null;
+                }
+                return registrations;
             });
         }
     }
