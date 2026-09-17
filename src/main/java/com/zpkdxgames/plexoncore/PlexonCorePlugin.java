@@ -23,7 +23,9 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.logging.Level;
 
@@ -45,7 +47,7 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
-        coreVersion = CoreVersion.of(2, 0, getPluginMeta().getVersion());
+        coreVersion = CoreVersion.of(2, 1, getPluginMeta().getVersion());
         textService = new TextService(getServer().getPluginManager());
         configService = new ConfigService(this, textService);
         ConfigService.ValidationResult initialConfig = configService.initializeCore();
@@ -63,11 +65,17 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         itemService = new ItemService();
         sqliteService = new SqliteService(scheduler);
         blockOriginService = new BlockOriginService(this, scheduler);
+        blockOriginService.configurePersistence(
+                Duration.ofMillis(configService.core().integer("origin-persistence.flush-interval-ms", 500)),
+                configService.core().integer("origin-persistence.batch-size", 512),
+                configService.core().integer("origin-persistence.pressure-threshold", 2048),
+                configService.core().integer("origin-persistence.max-retries", 6));
         blockOriginService.start(sqliteService, getDataFolder().toPath().resolve("core-origin.db"));
         eventGateway = new CoreEventGateway(this, blockOriginService);
         playerWatchService = new PlayerWatchService((watchId, failure) ->
                 getLogger().log(Level.SEVERE, "Core player-watch subscriber failed (watch " + watchId + ")", failure));
-        diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService, scheduler, guiService, textService, eventGateway, blockOriginService);
+        diagnosticsService = new DiagnosticsService(this, coreVersion, moduleRegistry, integrationRegistry, configService,
+                scheduler, guiService, textService, eventGateway, blockOriginService);
 
         moduleRegistry.discoverLegacy(getServer().getPluginManager());
         integrationRegistry.refresh();
@@ -84,16 +92,22 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
 
         getLogger().info(getPluginMeta().getVersion() + " enabled");
-        getLogger().info("API 2.0 (API 1.0 compatibility bridge enabled)");
+        getLogger().info("API 2.1 (API 2.0 plus API 1.0 compatibility bridge enabled)");
         getLogger().info("Shared player watch runtime ready");
         getLogger().info("Modules discovered: " + moduleRegistry.totalDetected());
-        String ready = integrationRegistry.all().stream().filter(i -> i.state() == IntegrationRegistry.IntegrationState.READY).map(IntegrationRegistry.IntegrationView::provider).sorted().reduce((a, b) -> a + ", " + b).orElse("none");
+        String ready = integrationRegistry.all().stream()
+                .filter(i -> i.state() == IntegrationRegistry.IntegrationState.READY)
+                .map(IntegrationRegistry.IntegrationView::provider).sorted()
+                .reduce((a, b) -> a + ", " + b).orElse("none");
         getLogger().info("Integrations ready: " + ready);
     }
 
     @Override
     public void onDisable() {
+        if (eventGateway != null) eventGateway.close();
         if (playerWatchService != null) playerWatchService.close();
+        if (guiService != null) guiService.close();
+        if (blockOriginService != null) blockOriginService.closeBounded(Duration.ofSeconds(4));
         if (moduleRegistry != null) moduleRegistry.clear();
         if (getServer() != null) getServer().getServicesManager().unregisterAll(this);
         if (sqliteService != null) sqliteService.close();
@@ -102,7 +116,10 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPluginEnable(PluginEnableEvent event) {
-        refreshDiscovery(event.getPlugin());
+        Plugin enabled = event.getPlugin();
+        if (enabled == this) return;
+        if (textService != null && enabled.getName().equalsIgnoreCase("PlaceholderAPI")) textService.refreshProviders();
+        refreshDiscovery(enabled);
     }
 
     @EventHandler
@@ -110,13 +127,21 @@ public final class PlexonCorePlugin extends JavaPlugin implements Listener {
         Plugin disabled = event.getPlugin();
         if (disabled == this) return;
         if (moduleRegistry != null) moduleRegistry.unregisterOwnedBy(disabled);
+        if (eventGateway != null) eventGateway.purgeOwner(disabled);
+        if (playerWatchService != null) playerWatchService.purgeOwner(disabled);
+        if (scheduler != null) scheduler.purgeOwner(disabled);
+        if (guiService != null) guiService.purgeOwner(disabled);
+        if (textService != null) textService.invalidateProvider(disabled.getName());
         refreshDiscovery(disabled);
     }
 
     private void refreshDiscovery(Plugin changedPlugin) {
         String pluginName = changedPlugin.getName();
         if (pluginName.equalsIgnoreCase(getName())) return;
-        if (pluginName.toLowerCase(java.util.Locale.ROOT).startsWith("plexon") || pluginName.equalsIgnoreCase("PlaceholderAPI") || pluginName.equalsIgnoreCase("Vault") || pluginName.equalsIgnoreCase("LuckPerms")) {
+        if (pluginName.toLowerCase(Locale.ROOT).startsWith("plexon")
+                || pluginName.equalsIgnoreCase("PlaceholderAPI")
+                || pluginName.equalsIgnoreCase("Vault")
+                || pluginName.equalsIgnoreCase("LuckPerms")) {
             Runnable refresh = () -> {
                 moduleRegistry.discoverLegacy(Bukkit.getPluginManager());
                 integrationRegistry.refresh();
