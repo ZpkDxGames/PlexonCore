@@ -1,6 +1,7 @@
 package com.zpkdxgames.plexoncore.api;
 
 import com.zpkdxgames.plexoncore.config.ConfigService;
+import com.zpkdxgames.plexoncore.diagnostics.DiagnosticsService.DetailedDiagnostics;
 import com.zpkdxgames.plexoncore.diagnostics.DiagnosticsService.DiagnosticsSnapshot;
 import com.zpkdxgames.plexoncore.event.CoreEventGateway;
 import com.zpkdxgames.plexoncore.gui.GuiService;
@@ -11,6 +12,8 @@ import com.zpkdxgames.plexoncore.origin.BlockOriginService;
 import com.zpkdxgames.plexoncore.persistence.SqliteService;
 import com.zpkdxgames.plexoncore.scheduler.CoreScheduler;
 import com.zpkdxgames.plexoncore.text.TextService;
+
+import java.util.List;
 
 public interface PlexonCoreAPI {
     CoreVersion version();
@@ -23,6 +26,15 @@ public interface PlexonCoreAPI {
     SqliteService persistence();
     ConfigService configs();
     DiagnosticsSnapshot diagnostics();
+
+    /**
+     * API 2.1 contributor-aware diagnostics. The default preserves binary compatibility for custom
+     * API implementations compiled against 2.0; PlexonCore's implementation overrides it with the
+     * full contributor set.
+     */
+    default DetailedDiagnostics detailedDiagnostics() {
+        return new DetailedDiagnostics(diagnostics(), List.of());
+    }
 
     /** API 2.0 shared event gateway. Existing API 1.x consumers do not need to call this method. */
     CoreEventGateway events();
