@@ -7,14 +7,17 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,9 +39,13 @@ public final class TextService {
         .hexColors()
         .useUnusualXRepeatedCharacterHexFormat()
         .build();
+    private final AtomicLong providerGeneration = new AtomicLong();
+    private final AtomicLong providerFailures = new AtomicLong();
+    private volatile PlaceholderAdapter placeholderAdapter = PlaceholderAdapter.absent("Not initialized");
 
     public TextService(PluginManager pluginManager) {
         this.pluginManager = Objects.requireNonNull(pluginManager);
+        refreshProviders();
     }
 
     public Component render(TextMode mode, String input) {
@@ -98,15 +105,44 @@ public final class TextService {
         return out.toString();
     }
 
-    private String applyPlaceholderApi(OfflinePlayer player, String input) {
-        String source = input == null ? "" : input;
-        if (pluginManager.getPlugin("PlaceholderAPI") == null) return source;
+    /** Rebuilds optional-provider adapters. Call on provider enable/re-enable. */
+    public synchronized void refreshProviders() {
+        Plugin plugin = pluginManager.getPlugin("PlaceholderAPI");
+        long generation = providerGeneration.incrementAndGet();
+        if (plugin == null || !plugin.isEnabled()) {
+            placeholderAdapter = PlaceholderAdapter.absent("PlaceholderAPI not enabled", generation);
+            return;
+        }
         try {
             Class<?> api = Class.forName("me.clip.placeholderapi.PlaceholderAPI");
             Method method = api.getMethod("setPlaceholders", OfflinePlayer.class, String.class);
-            Object value = method.invoke(null, player, source);
+            placeholderAdapter = new PlaceholderAdapter(true, method, "Ready", generation);
+        } catch (ReflectiveOperationException | LinkageError error) {
+            placeholderAdapter = PlaceholderAdapter.absent(error.getClass().getSimpleName() + ": " + error.getMessage(), generation);
+        }
+    }
+
+    /** Invalidates a cached adapter before/while the provider is disabled. */
+    public synchronized void invalidateProvider(String pluginName) {
+        if (pluginName != null && pluginName.equalsIgnoreCase("PlaceholderAPI")) {
+            placeholderAdapter = PlaceholderAdapter.absent("PlaceholderAPI disabled", providerGeneration.incrementAndGet());
+        }
+    }
+
+    public ProviderSnapshot placeholderProvider() {
+        PlaceholderAdapter adapter = placeholderAdapter;
+        return new ProviderSnapshot(adapter.ready(), adapter.detail(), adapter.generation(), providerFailures.get());
+    }
+
+    private String applyPlaceholderApi(OfflinePlayer player, String input) {
+        String source = input == null ? "" : input;
+        PlaceholderAdapter adapter = placeholderAdapter;
+        if (!adapter.ready() || adapter.method() == null) return source;
+        try {
+            Object value = adapter.method().invoke(null, player, source);
             return value instanceof String string ? string : source;
-        } catch (ReflectiveOperationException ex) {
+        } catch (IllegalAccessException | InvocationTargetException | RuntimeException error) {
+            providerFailures.incrementAndGet();
             return source;
         }
     }
@@ -127,4 +163,12 @@ public final class TextService {
 
     public enum TextMode { SAFE, LEGACY, MINIMESSAGE }
     public record ValidationResult(boolean valid, String reason, int position) {}
+    public record ProviderSnapshot(boolean ready, String detail, long generation, long invocationFailures) {}
+
+    private record PlaceholderAdapter(boolean ready, Method method, String detail, long generation) {
+        private static PlaceholderAdapter absent(String detail) { return absent(detail, 0L); }
+        private static PlaceholderAdapter absent(String detail, long generation) {
+            return new PlaceholderAdapter(false, null, detail == null ? "Unavailable" : detail, generation);
+        }
+    }
 }
